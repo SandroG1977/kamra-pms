@@ -115,7 +115,7 @@ export const APPS: AppDef[] = [
     roles: ["Front Desk", "Night Auditor", "Hotel Admin", "System Manager", "Administrator"],
     items: [
       { to: "/", label: "Today", icon: Home },
-      { to: "/assistant", label: "Kamra Agent", icon: Sparkles, featured: true,
+      { to: "/assistant", label: "UnitHOS Agent", icon: Sparkles, featured: true,
         keywords: ["AI", "Assistant", "Copilot", "Ask"] },
       { to: "/in-house", label: "In House", icon: BedDouble,
         keywords: ["Arrivals", "Departures", "In-house guests", "Who is in", "Due out"] },

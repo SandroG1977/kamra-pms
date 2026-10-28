@@ -1,6 +1,6 @@
 app_name = "kamra"
-app_title = "Kamra"
-app_publisher = "HeyKoala"
+app_title = "UnitHOS PMS"
+app_publisher = "UnitHOS"
 app_description = (
 	"Open-source, AI-native hotel PMS — front desk, direct booking, "
 	"housekeeping, folios and GST billing, with an MCP tool layer so AI "

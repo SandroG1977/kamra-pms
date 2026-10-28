@@ -171,11 +171,11 @@ services:
       - db-data:/var/lib/mysql
 
   redis-cache:
-    image: redis:8.6-alpine
+    image: valkey/valkey:8-alpine
     restart: unless-stopped
 
   redis-queue:
-    image: redis:8.6-alpine
+    image: valkey/valkey:8-alpine
     restart: unless-stopped
     volumes:
       - redis-queue-data:/data
