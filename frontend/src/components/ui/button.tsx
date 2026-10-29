@@ -5,9 +5,9 @@ type Variant = "primary" | "outline" | "ghost"
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-brand-600 text-white hover:bg-brand-700 focus-visible:outline-brand-600",
+    "bg-gradient-to-r from-[#1ea6da] to-[#736cf0] text-white shadow-sm hover:opacity-90 focus-visible:outline-[#1ea6da]",
   outline:
-    "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100 focus-visible:outline-zinc-400",
+    "border border-[#1ea6da]/40 bg-transparent text-[#1ea6da] hover:bg-[#1ea6da]/10 focus-visible:outline-[#1ea6da]",
   ghost: "text-zinc-600 hover:bg-zinc-100 focus-visible:outline-zinc-400",
 }
 

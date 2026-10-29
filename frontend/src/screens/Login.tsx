@@ -9,9 +9,9 @@ import { useT, t as translate } from "../lib/i18n"
 
 
 const inputCls =
-  "w-full rounded border border-[#E2E8F0] bg-[#ffffff] px-3 py-2 text-sm " +
-  "text-[#191c1e] placeholder:text-[#6f7a71] " +
-  "focus:outline-2 focus:outline-offset-1 focus:outline-[#1E7B4F]"
+  "w-full rounded border border-[#1e293b] bg-[#0d1522] px-3 py-2 text-sm " +
+  "text-[#f8fafc] placeholder:text-[#64748b] " +
+  "focus:outline-2 focus:outline-offset-1 focus:outline-[#1ea6da]"
 
 const DEMO_ACCOUNTS = [
   { label: "System Admin", usr: "admin@kamra.local", pwd: "KamraAdmin1!" },
@@ -64,31 +64,21 @@ export default function Login(props: { onSuccess: () => void }) {
 
   return (
     <div
-      className="flex min-h-[100dvh] flex-col items-center justify-center bg-[#f7f9fb] px-4"
-      style={{ colorScheme: "light" }}
+      className="flex min-h-[100dvh] flex-col items-center justify-center bg-[#06080c] px-4"
     >
-      <div className="fixed inset-x-0 top-0 h-[5px] bg-[#1C3F38]" aria-hidden />
+      <div className="fixed inset-x-0 top-0 h-[3px] bg-gradient-to-r from-[#1ea6da] to-[#736cf0]" aria-hidden />
       <div className="w-full max-w-sm">
         {sessionEnded && (
-          <p className="mb-4 rounded border border-[#fde68a] bg-[#fffbeb] px-4 py-2.5 text-center text-sm text-[#92400e]">
+          <p className="mb-4 rounded border border-amber-500/30 bg-amber-950/40 px-4 py-2.5 text-center text-sm text-amber-200">
             {t("Your session ended. Sign in to pick up where you left off.")}
           </p>
         )}
-        <div className="mb-6 flex flex-col items-center gap-2">
-          <img src={asset("unithos-mark.svg")} alt="UnitHOS" className="size-16" />
-          <span
-            className="text-2xl font-semibold tracking-[0.02em] text-[#1C3F38]"
-            style={{ fontFamily: "Montserrat, ui-sans-serif, system-ui, sans-serif" }}
-          >
-            UnitHOS
-            <span className="ml-1.5 align-middle text-[10px] font-semibold tracking-[0.4em] text-[#1E7B4F]">
-              PMS
-            </span>
-          </span>
-          <label className="mt-1 flex items-center gap-2 text-xs text-[#6f7a71]">
+        <div className="mb-6 flex flex-col items-center gap-3">
+          <img src={asset("unithos-pms-full.png")} alt="UnitHOS PMS" className="h-20 w-auto object-contain" />
+          <label className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
             <span>{t("Language")}</span>
             <select
-              className="rounded border border-[#E2E8F0] bg-white px-2 py-1 text-xs text-[#3f4941]"
+              className="rounded border border-[#1e293b] bg-[#0d1522] px-2 py-1 text-xs text-zinc-300"
               value={langState}
               onChange={(e) => {
                 const next = e.target.value as Lang
@@ -107,14 +97,14 @@ export default function Login(props: { onSuccess: () => void }) {
         </div>
 
         <form
-          className="space-y-3 rounded border border-[#E2E8F0] bg-[#ffffff] p-6"
+          className="space-y-3 rounded-xl border border-[#1e293b] bg-[#0d1522] p-6 shadow-xl"
           onSubmit={(e) => {
             e.preventDefault()
             submit()
           }}
         >
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-[#3f4941]">
+            <span className="mb-1 block text-xs font-medium text-zinc-300">
               {t("Email or username")}
             </span>
             <input
@@ -130,7 +120,7 @@ export default function Login(props: { onSuccess: () => void }) {
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-[#3f4941]">
+            <span className="mb-1 block text-xs font-medium text-zinc-300">
               {t("Password")}
             </span>
             <input

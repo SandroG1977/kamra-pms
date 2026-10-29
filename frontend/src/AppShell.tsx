@@ -352,9 +352,9 @@ export default function AppShell() {
         end={item.to === "/"}
         className={({ isActive }) =>
           cn(
-            "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium",
+            "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
             isActive
-              ? "bg-brand-50 text-brand-700"
+              ? "bg-gradient-to-r from-[#1ea6da]/20 to-[#736cf0]/20 text-[#1ea6da] font-semibold border-l-2 border-[#1ea6da]"
               : "text-zinc-600 hover:bg-zinc-100",
           )
         }
@@ -390,12 +390,12 @@ export default function AppShell() {
           to="/"
           end
           aria-label={t("Home")}
-          className="mb-5 flex items-center gap-2 rounded-lg px-1 outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
+          className="mb-5 flex items-center gap-2.5 rounded-lg px-1 outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
         >
-          <img src={asset("unithos-mark.svg")} alt="" className="size-7" aria-hidden />
-          <span className="text-lg font-semibold tracking-tight text-zinc-900">
-            UnitHOS
-            <span className="ml-1 align-middle text-[10px] font-semibold tracking-[0.2em] text-brand-600">
+          <img src={asset("unithos-pms-mark.png")} alt="UnitHOS PMS" className="h-7 w-auto shrink-0 object-contain" />
+          <span className="text-base font-bold tracking-tight text-zinc-900">
+            <span className="text-[#1ea6da]">UnitHOS</span>
+            <span className="ml-1.5 rounded bg-[#736cf0]/15 px-1.5 py-0.5 align-middle text-[10px] font-bold tracking-wider text-[#736cf0]">
               PMS
             </span>
           </span>

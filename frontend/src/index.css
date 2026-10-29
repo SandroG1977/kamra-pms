@@ -1,46 +1,43 @@
 @import "tailwindcss";
 
 @theme {
-  /* Kamra brand: deep hotel green, warm neutrals */
-  --color-brand-50: #ecf7f2;
-  --color-brand-100: #d2ece0;
-  --color-brand-600: #0f6b54;
-  --color-brand-700: #0b5442;
-  --color-brand-900: #073527;
+  /* UnitHOS brand: Electric Cyan & Deep Violet/Indigo */
+  --color-brand-50: #f0f9ff;
+  --color-brand-100: #e0f2fe;
+  --color-brand-600: #1ea6da;
+  --color-brand-700: #0284c7;
+  --color-brand-900: #0c4a6e;
 
-  /* Neutrals carry a faint warm bias so the greys read as chosen, not the
-     stock cool zinc. Dark mode + print remap these below. */
-  --color-zinc-50: #f8f7f5;
-  --color-zinc-100: #f1efec;
-  --color-zinc-200: #e6e3de;
+  /* Neutrals: UnitHOS Slate */
+  --color-zinc-50: #f8fafc;
+  --color-zinc-100: #f1f5f9;
+  --color-zinc-200: #e2e8f0;
 }
 
 html {
   font-feature-settings: "tnum" 1; /* tabular numbers for counts and money */
 }
 
-/* Dark mode: every utility reads its color from a CSS variable, so
-   remapping the palette on .dark themes the whole app. Scrims/overlays
-   use bg-black so they stay dark in both themes. */
+/* Dark mode: aligned with UnitHOS OS Console (#06080C / #0A0F19 / #0D1522) */
 .dark {
   color-scheme: dark;
-  --color-white: #1c1c1f;
-  --color-zinc-50: #151517;
-  --color-zinc-100: #232326;
-  --color-zinc-200: #2f2f34;
-  --color-zinc-300: #43434a;
-  --color-zinc-400: #8a8a93;
-  --color-zinc-500: #a7a7b0;
-  --color-zinc-600: #c6c6cd;
-  --color-zinc-700: #dadade;
-  --color-zinc-800: #ebebee;
-  --color-zinc-900: #f6f6f7;
+  --color-white: #0d1522;
+  --color-zinc-50: #06080c;
+  --color-zinc-100: #0a0f19;
+  --color-zinc-200: #162235;
+  --color-zinc-300: #1e293b;
+  --color-zinc-400: #64748b;
+  --color-zinc-500: #94a3b8;
+  --color-zinc-600: #cbd5e1;
+  --color-zinc-700: #e2e8f0;
+  --color-zinc-800: #f1f5f9;
+  --color-zinc-900: #f8fafc;
   --color-zinc-950: #ffffff;
-  --color-brand-50: #10312a;
-  --color-brand-100: #154438;
-  --color-brand-600: #189776;
-  --color-brand-700: #41c39e;
-  --color-brand-900: #cdeee0;
+  --color-brand-50: #0f1f33;
+  --color-brand-100: #142a45;
+  --color-brand-600: #1ea6da;
+  --color-brand-700: #38bdf8;
+  --color-brand-900: #bae6fd;
   --color-rose-50: #391521;
   --color-rose-200: #5c2537;
   --color-rose-500: #fb7185;
