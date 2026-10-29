@@ -170,8 +170,8 @@ export default function Login(props: { onSuccess: () => void }) {
         </div>
         )}
         {version && (
-          <p className="mt-6 text-center text-[11px] text-[#6f7a71]">
-            Kamra PMS v{version}
+          <p className="mt-6 text-center text-[11px] text-[#64748b]">
+            UnitHOS PMS v{version}
           </p>
         )}
       </div>

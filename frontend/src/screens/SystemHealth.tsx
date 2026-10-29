@@ -124,7 +124,7 @@ export default function SystemHealth() {
             {t("System Health")}
           </h1>
           <p className="mt-0.5 text-sm text-zinc-500">
-            {t("Check the status of this Kamra site and whether a newer open-source release is available.")}
+            {t("Check the status of this UnitHOS site and whether a newer release is available.")}
           </p>
         </div>
         <Button
@@ -160,7 +160,7 @@ export default function SystemHealth() {
                   {t("Installed")}
                 </p>
                 <p className="mt-0.5 font-mono text-sm font-semibold">
-                  kamra {data.installed.kamra}
+                  UnitHOS {data.installed.kamra}
                 </p>
                 <p className="text-xs text-zinc-500">
                   Frappe {data.installed.frappe ?? "-"}
@@ -224,7 +224,7 @@ export default function SystemHealth() {
                           </a>
                         )}
                       </p>
-                      <p className="mt-0.5 text-sm text-zinc-500">{c.detail}</p>
+                      <p className="mt-0.5 text-sm text-zinc-500">{c.detail.replace(/Kamra/g, "UnitHOS").replace(/kamra/g, "unithos")}</p>
                     </div>
                     <StatusPill status={c.status} />
                   </div>
@@ -238,7 +238,7 @@ export default function SystemHealth() {
               <CardTitle>{t("How to upgrade")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-zinc-600">
-              <p>{t(data.upgrade.note)}</p>
+              <p>{t(data.upgrade.note).replace(/Kamra/g, "UnitHOS")}</p>
               <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
                 <p className="text-xs font-medium uppercase tracking-wider text-zinc-400">
                   {t("Docker (self-host)")}
