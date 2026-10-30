@@ -1108,7 +1108,7 @@ export default function Setup() {
           {step === importStep && (
             <div className="space-y-4">
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                <span className="font-semibold">{createdProperty}</span> {t("is live. Bring your bookings, companies and opening balances over from Kamra's CSV templates, then reconcile before you switch - or let the AI migration assistant do the mapping via MCP.")}
+                <span className="font-semibold">{createdProperty}</span> {t("is live. Bring your bookings, companies and opening balances over from UnitHOS's CSV templates, then reconcile before you switch - or let the AI migration assistant do the mapping via MCP.")}
               </div>
               <div className="rounded-lg border border-brand-200 bg-brand-50/60 px-4 py-3 text-sm text-zinc-800">
                 <p className="font-semibold text-brand-800">
