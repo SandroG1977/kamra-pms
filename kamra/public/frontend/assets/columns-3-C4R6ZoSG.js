@@ -1,4 +1,8 @@
+<<<<<<<< HEAD:kamra/public/frontend/assets/columns-3-C4R6ZoSG.js
 import{b as t}from"./index-1vu-EyMg.js";/**
+========
+import{b as t}from"./index-CrSRnPUD.js";/**
+>>>>>>>> origin/develop:kamra/public/frontend/assets/columns-3-BN-a78H9.js
  * @license lucide-react v0.525.0 - ISC
  *
  * This source code is licensed under the ISC license.

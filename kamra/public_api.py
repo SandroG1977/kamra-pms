@@ -107,6 +107,7 @@ def _property_payload(prop) -> dict:
 		"minimum_nights": int(prop.get("minimum_nights") or 1),
 		"free_cancel_days": int(prop.get("free_cancel_days") or 0),
 		"cancellation_fee": prop.get("cancellation_fee") or "None",
+		"has_cancellation_tiers": bool(prop.get("cancellation_tiers")),
 		"booking_mode": prop.get("booking_mode") or "Instant",
 		"property_kind": prop.get("property_kind") or "Hotel",
 	}
@@ -257,7 +258,19 @@ def site_info():
 		# kamra_build (a short commit id) is optional.
 		"channel": (frappe.conf.get("kamra_channel") or "")[:20] or None,
 		"build": (frappe.conf.get("kamra_build") or "")[:12] or None,
+		**_brand(),
 	}
+
+
+def _brand() -> dict:
+	"""A hotel's or partner's own name and logo, shown next to Kamra's
+	(co-branding, as ERPNext does). Read from Frappe's own Website and Navbar
+	Settings; Frappe's stock app name "Frappe" counts as not set."""
+	name = (frappe.get_website_settings("app_name") or "").strip()
+	logo = (frappe.get_website_settings("app_logo")
+	        or frappe.db.get_single_value("Navbar Settings", "app_logo"))
+	return {"brand_name": None if name in ("", "Frappe") else name,
+	        "brand_logo": logo or None}
 
 
 @frappe.whitelist(allow_guest=True)
@@ -290,10 +303,11 @@ def _public_locale(property: str) -> dict:
 	prop = frappe.get_cached_doc("Property", property)
 	pack = pack_for(property)
 	loc = pack.locale(prop)
-	# "" is a valid symbol (generic pack shows bare numbers) - only the
-	# missing key falls back to the rupee
-	return {"currency_symbol": loc.get("currency_symbol", "₹"),
-	        "locale": loc.get("locale") or "en-IN",
+	# "" is a valid symbol (generic pack shows bare numbers)
+	return {"currency_symbol": loc.get("currency_symbol") or "",
+	        "locale": loc.get("locale") or "en",
+	        "currency": loc.get("currency") or "",
+	        "default_language": prop.get("booking_language") or None,
 	        **privacy_terms(pack)}
 
 
@@ -349,8 +363,14 @@ def search_stay(property: str, check_in_date: str, check_out_date: str,
                 adults: int = 2, children: int = 0,
                 listing_slug: str | None = None,
                 location_slug: str | None = None, pets: int = 0,
-                child_ages=None):
+                child_ages=None, voucher_code: str | None = None):
 	"""Availability + real quoted price per room type for the stay.
+
+	Each available row also carries `plans`: the stay quoted room only
+	(first) and with each meal plan, so the page lists real totals per plan. A valid
+	`voucher_code` discounts every quote, and each plan then keeps its
+	undiscounted `list_amount` for the strike-through; an invalid one is
+	ignored here (check_voucher tells the guest why).
 
 	`child_ages` (e.g. [3, 8, 13]) lets each room type's age bands decide who
 	is free, a child or an adult; without it `children` are all children.
@@ -373,6 +393,15 @@ def search_stay(property: str, check_in_date: str, check_out_date: str,
 	_party(None, adults, children, None)  # at least one adult, before any work
 
 	prop = frappe.get_cached_doc("Property", property)
+	voucher = _usable_voucher(property, voucher_code, nights)
+	# the first plan is the room-only price: a free plan (EP) when the
+	# property has one, else no meal plan at all
+	mps = frappe.get_all(
+		"Meal Plan", filters={"property": property, "disabled": 0},
+		fields=["name", "price_per_adult", "price_per_child"],
+		order_by="price_per_adult asc")
+	free = [m.name for m in mps if not (m.price_per_adult or m.price_per_child)]
+	meal_plans = [free[0] if free else ""] + [m.name for m in mps if m.name not in free]
 	results = []
 	for rt in frappe.get_all(
 		"Room Type",
@@ -404,12 +433,25 @@ def search_stay(property: str, check_in_date: str, check_out_date: str,
 			           confirmation_reason=_over_capacity_note(above))
 		if left:
 			try:
-				q = quote(property, rt, check_in_date, check_out_date,
-				          a, c, pets=int(pets or 0))
+				plans = []
+				for mp in meal_plans:
+					pq = quote(property, rt, check_in_date, check_out_date,
+					           a, c, mp or None, voucher_code=voucher,
+					           pets=int(pets or 0))
+					plan = {"meal_plan": mp, "amount_after_tax": pq["amount_after_tax"],
+					        **_payment_split(prop, pq["amount_after_tax"],
+					                         pq.get("stay_rules"))}
+					if voucher:
+						plan["list_amount"] = quote(
+							property, rt, check_in_date, check_out_date, a, c,
+							mp or None, pets=int(pets or 0))["amount_after_tax"]
+					if not plans:
+						q = pq
+					plans.append(plan)
 				rules = q.get("stay_rules") or {}
-				q.update(_payment_split(prop, q.get("amount_after_tax"),
-				                        rules.get("full_payment")))
+				q.update(_payment_split(prop, q.get("amount_after_tax"), rules))
 				row["quote"] = q
+				row["plans"] = plans
 				need = max(int(rules.get("minimum_nights") or 0),
 				           int(prop.get("minimum_nights") or 1))
 				if nights < need:
@@ -420,6 +462,18 @@ def search_stay(property: str, check_in_date: str, check_out_date: str,
 				pass  # still list the room type even if this date range cannot be quoted
 		results.append(row)
 	return results
+
+
+def _usable_voucher(property: str, code: str | None, nights: int) -> str | None:
+	"""The code when it is valid for this stay, else None."""
+	if not (code or "").strip():
+		return None
+	from kamra.pricing import validate_voucher
+	try:
+		validate_voucher(property, code, nights)
+	except frappe.ValidationError:
+		return None
+	return code.strip()
 
 
 def _res_by_token(token: str):
@@ -445,6 +499,7 @@ def precheckin_info(token: str):
 		"ui_locale": _public_locale(res.property),
 		# which IDs this country accepts, and the likely nationality
 		"id_types": vocab["id_types"],
+		"id_type_hints": vocab["id_type_hints"],
 		"default_nationality": vocab["default_nationality"],
 		"property": {
 			"property_name": prop.property_name,
@@ -487,7 +542,70 @@ def precheckin_info(token: str):
 			"has_id_document": bool(res.get("id_document")),
 			"id_document_on": str(res.get("id_document_on") or ""),
 		},
+		# the others staying, as named at booking: name and age only - their
+		# ID details are never sent back to the link. A row the desk has
+		# confirmed (an age or an ID) is locked: the guest cannot change it.
+		"occupants": [{"row": o.name, "full_name": o.full_name,
+		               "age": o.age or o.get("guest_stated_age") or None,
+		               "has_id": bool(o.id_number or o.get("id_file")),
+		               "locked": bool(o.age or o.id_number or o.get("id_file"))}
+		              for o in res.get("occupants") or []],
 	}
+
+
+def _merge_precheckin_occupants(res, rows) -> None:
+	"""The people staying with the guest, from the pre-check-in page. The
+	list is the guest's own: a row left out is removed, and a row sent back
+	is edited in place. Only rows the desk has not confirmed can change.
+
+	An age from this page is only what the guest says: it goes in
+	guest_stated_age, never in `age`, because `age` decides who stays free
+	and the price must not move on an unverified word. The desk confirms it
+	at check-in. A child's ID is not kept unless the register needs it."""
+	from kamra.localization import is_minor, minor_id_kept, pack_for, validate_id_type
+	if isinstance(rows, str):
+		rows = frappe.parse_json(rows) if rows.strip() else []
+
+	def locked(row) -> bool:
+		return bool(row.age or row.id_number or row.get("id_file"))
+
+	doc = frappe.get_doc("Reservation", res.name)
+	pack = pack_for(doc.property)
+	default_nat = getattr(pack, "DEFAULT_NATIONALITY", "")
+	by_row = {o.name: o for o in doc.get("occupants") or []}
+	by_name = {(o.full_name or "").strip().lower(): o for o in doc.get("occupants") or []}
+	kept = set()
+	for o in (rows or [])[:20]:
+		name = str(o.get("full_name") or "").strip()[:140]
+		if not name or name.lower() == (doc.guest_name or "").strip().lower():
+			continue
+		# a blank or 0 age is not given (a baby's age is entered as 1)
+		age = cint(o.get("age")) or None
+		if age is not None and not 0 < age <= 120:
+			age = None
+		id_type = str(o.get("id_type") or "").strip()[:60]
+		id_number = str(o.get("id_number") or "").strip()[:40]
+		if is_minor(pack, age) and not minor_id_kept(pack, default_nat):
+			id_type = id_number = ""
+		if id_type and id_number:
+			validate_id_type(doc.property, id_type)
+		else:
+			id_type = id_number = ""
+		row = by_row.get(o.get("row")) or by_name.get(name.lower())
+		if row is None:
+			row = doc.append("occupants", {"full_name": name, "nationality": default_nat})
+			by_name[name.lower()] = row
+		elif not locked(row):
+			row.full_name = name
+		kept.add(id(row))
+		if not row.age and age is not None:
+			row.guest_stated_age = age
+		if id_number and not row.id_number:
+			row.id_type, row.id_number = id_type, id_number
+	for row in list(doc.get("occupants") or []):
+		if id(row) not in kept and not locked(row):
+			doc.remove(row)
+	doc.save(ignore_permissions=True)
 
 
 def _save_id_image(guest: str, data_url: str,
@@ -530,7 +648,8 @@ def precheckin_submit(token: str, id_type: str, id_number: str,
                       address_line: str = "", city: str = "",
                       eta: str = "", special_requests: str = "",
                       signature: str = "", consent: int = 0,
-                      id_image: str = "", address_image: str = ""):
+                      id_image: str = "", address_image: str = "",
+                      occupants: str = ""):
 	"""Guest completes pre-arrival check-in and signs the registration card
 	(PRD FR-20 - details + declaration + e-signature; the signed card becomes
 	the paperless GRC the desk views at arrival). The guest can attach a
@@ -571,6 +690,8 @@ def precheckin_submit(token: str, id_type: str, id_number: str,
 		"precheckin_signature": signature if signed else None,
 		"precheckin_consent": 1 if int(consent or 0) else 0,
 	})
+	if occupants:
+		_merge_precheckin_occupants(res, occupants)
 
 	from kamra.savings import log_action
 	log_action(
@@ -752,19 +873,22 @@ def _over_capacity_note(above: int) -> str:
 	        "confirms the arrangement and the price for them.")
 
 
-def _advance_terms(prop, total: float, full_payment: bool = False) -> tuple[float, str]:
+def _advance_terms(prop, total: float, rules: dict | None = None) -> tuple[float, str]:
 	"""What the guest pays online now, and a human label - computed from the
 	property's CURRENT booking-payment policy. Snapshotted onto the booking so
 	a later policy change never re-bills an existing guest. A season marked
 	full payment (holidays, December) takes the whole amount whatever the
-	usual advance."""
+	usual advance; a season with its own advance % (25, 50) asks that % for
+	these dates. `rules` is the quote's stay_rules."""
+	rules = rules or {}
 	mode = prop.get("booking_payment_mode") or "Pay at hotel"
 	total = float(total or 0)
 	sym = _public_locale(prop.name).get("currency_symbol", "") if prop.get("name") else ""
-	if full_payment and mode != "Pay at hotel":
+	season_pct = float(rules.get("advance_percent") or 0)
+	if rules.get("full_payment") and mode != "Pay at hotel":
 		return total, f"Full payment ({sym}{total:,.0f}) on booking for these dates"
-	if mode == "Advance percent":
-		pct = float(prop.get("advance_percent") or 0)
+	if mode == "Advance percent" or (season_pct and mode != "Pay at hotel"):
+		pct = season_pct or float(prop.get("advance_percent") or 0)
 		due = round(total * pct / 100, 2)
 		return due, f"{pct:g}% advance ({sym}{due:,.0f}) now, rest at the hotel"
 	if mode == "Registration fee":
@@ -775,11 +899,11 @@ def _advance_terms(prop, total: float, full_payment: bool = False) -> tuple[floa
 	return 0.0, "Pay at the hotel"
 
 
-def _payment_split(prop, total: float, full_payment: bool = False) -> dict:
+def _payment_split(prop, total: float, rules: dict | None = None) -> dict:
 	"""Server-computed split the booking page shows: what is due now and
 	what is left to pay at the hotel. The browser never derives these."""
 	total = float(total or 0)
-	due, policy = _advance_terms(prop, total, full_payment)
+	due, policy = _advance_terms(prop, total, rules)
 	return {
 		"advance_due": due,
 		"balance_at_hotel": round(max(0.0, total - due), 2),
@@ -847,9 +971,9 @@ def book(property: str, room_type: str, check_in_date: str,
 		int(adults), int(children), meal_plan or None,
 		voucher_code=voucher_code or None, pets=int(pets or 0),
 	)
-	full_payment = bool((q.get("stay_rules") or {}).get("full_payment"))
+	stay_rules = q.get("stay_rules") or {}
 	advance_due, policy = _advance_terms(
-		prop, float(q["amount_after_tax"] or 0), full_payment)
+		prop, float(q["amount_after_tax"] or 0), stay_rules)
 
 	status = None
 	hold_expires_on = None
@@ -892,7 +1016,7 @@ def book(property: str, room_type: str, check_in_date: str,
 		# later change to the property's payment config never re-bills this guest
 		total = float(result["amount_after_tax"] or 0)
 		# Recompute against the saved total (voucher / engine may differ).
-		advance_due, policy = _advance_terms(prop, total, full_payment)
+		advance_due, policy = _advance_terms(prop, total, stay_rules)
 		updates = {
 			"advance_due": advance_due,
 			"payment_policy": policy,
@@ -966,8 +1090,9 @@ def check_voucher(property: str, code: str, nights: int = 1):
 		v = validate_voucher(property, code, int(nights or 1))
 	except Exception as e:
 		return {"ok": False, "message": str(e)}
+	from kamra.localization import money_text
 	label = (f"{v.value:g}% off" if v.discount_type == "Percent"
-	         else f"₹{v.value:,.0f} off")
+	         else f"{money_text(property, round(v.value))} off")
 	return {"ok": True, "message": f"'{v.voucher_code}' applied - {label}.",
 	        "discount_type": v.discount_type, "value": float(v.value)}
 

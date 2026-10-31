@@ -1,4 +1,8 @@
+<<<<<<<< HEAD:kamra/public/frontend/assets/OpsSLA-D8FhUUx8.js
 import{r as l,j as e,L as N}from"./vendor-D6bHyl-8.js";import{b as z,u as w,f as S,g as C,s as O,t as s}from"./index-1vu-EyMg.js";import{C as n,c as d,a as x,b as h}from"./card-QGLPdFhu.js";import{B as T}from"./badge-D5yj-JRA.js";/**
+========
+import{r as l,j as e,L as N}from"./vendor-D6bHyl-8.js";import{b as z,u as w,f as S,g as C,s as O,t as s}from"./index-CrSRnPUD.js";import{C as n,c as d,a as x,b as h}from"./card-BAGAd1G7.js";import{B as T}from"./badge-CKW9L1TZ.js";/**
+>>>>>>>> origin/develop:kamra/public/frontend/assets/OpsSLA-Ct2Im9AP.js
  * @license lucide-react v0.525.0 - ISC
  *
  * This source code is licensed under the ISC license.

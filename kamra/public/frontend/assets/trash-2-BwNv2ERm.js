@@ -1,4 +1,8 @@
+<<<<<<<< HEAD:kamra/public/frontend/assets/trash-2-BwNv2ERm.js
 import{b as e}from"./index-1vu-EyMg.js";/**
+========
+import{b as e}from"./index-CrSRnPUD.js";/**
+>>>>>>>> origin/develop:kamra/public/frontend/assets/trash-2-C3-8AatB.js
  * @license lucide-react v0.525.0 - ISC
  *
  * This source code is licensed under the ISC license.

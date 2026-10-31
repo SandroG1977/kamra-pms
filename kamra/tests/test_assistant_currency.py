@@ -145,3 +145,37 @@ class AssistantCurrencyTestCase(unittest.TestCase):
 
 	def test_streaming_chat_sends_the_property_currency_to_both_provider_calls(self):
 		self.check_chat_path(streamed=True)
+
+	def test_quote_occupancy_instructions_and_tool_rules(self):
+		"""Ensure the assistant rules explicitly tell the LLM to use `quote`
+		with exact occupancy and prohibit quoting from booking_options base_price."""
+		text = self.prompt("BRL", "R$")
+		self.assertIn("Always call `quote` with the requested dates and exact adult/child occupancy", text)
+		self.assertIn("Never quote prices using the base_price from `booking_options` or `availability`", text)
+
+		tool_desc = assistant.TOOLS["booking_options"][1]
+		self.assertIn("Do not use its base_price to quote stays", tool_desc)
+		self.assertIn("call `quote` for actual pricing", tool_desc)
+
+	def test_out_of_credit_is_said_plainly_on_every_chat_path(self):
+		settings = SimpleNamespace(enabled=True, base_url="https://provider.example.test/v1",
+		                           model="m", get_password=Mock(return_value="k"))
+		broke = Mock(status_code=429, text=json.dumps(
+			{"error": {"code": "insufficient_quota", "message": "You exceeded your current quota"}}))
+		history = [{"role": "user", "content": "hi"}]
+		with ExitStack() as stack:
+			stack.enter_context(patch.object(assistant, "_settings", return_value=settings))
+			stack.enter_context(patch.object(assistant, "_system_prompt", return_value="sys"))
+			stack.enter_context(patch.object(assistant, "_tool_defs", return_value=[]))
+			stack.enter_context(patch.object(assistant, "_post_chat", return_value=broke))
+			with self.assertRaises(frappe.ValidationError) as err:
+				unwrap(assistant.ask)("P", history)
+			self.assertIn("out of credit", str(err.exception))
+			for fn in (assistant.ask_stream, assistant.help_ask):
+				body = unwrap(fn)("P", history).get_data(as_text=True)
+				self.assertIn('"code": "out_of_credit"', body, fn.__name__)
+				self.assertNotIn("AI provider error", body)
+		# any other failure keeps the provider's own error
+		self.assertIn("AI provider error (500)",
+		              assistant._provider_error(Mock(status_code=500, text="boom")))
+		self.assertTrue(assistant._out_of_credit(Mock(status_code=402, text="")))

@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, type ReactNode } from "react"
+import { lazy, Suspense, useEffect } from "react"
 import {
   Navigate,
   Outlet,
@@ -13,6 +13,7 @@ const Login = lazy(() => import("./screens/Login"))
 import { useAuth } from "./lib/auth"
 import { t, useT, t as translate, useUILanguage } from "./lib/i18n"
 import { toFullPath } from "./lib/routing"
+import { syncLang } from "./lib/dir"
 const Billing = lazy(() => import("./screens/Billing"))
 const EndOfDay = lazy(() => import("./screens/EndOfDay"))
 const EndOfDayWizard = lazy(() => import("./screens/EndOfDayWizard"))
@@ -25,7 +26,10 @@ const GuestJourney = lazy(() => import("./screens/GuestJourney"))
 const HkApp = lazy(() => import("./screens/HkApp"))
 const Guests = lazy(() => import("./screens/Guests"))
 const RegistrationCard = lazy(() => import("./screens/RegistrationCard"))
+const GroupQuotation = lazy(() => import("./screens/GroupQuotation"))
 const CancellationLetter = lazy(() => import("./screens/CancellationLetter"))
+const AllowanceVoucher = lazy(() => import("./screens/AllowanceVoucher"))
+const TripConfirmation = lazy(() => import("./screens/TripConfirmation"))
 const Setup = lazy(() => import("./screens/Setup"))
 const GoLiveImport = lazy(() => import("./screens/GoLiveImport"))
 const HousekeepingBoard = lazy(() => import("./screens/HousekeepingBoard"))
@@ -53,17 +57,23 @@ const RateCalendar = lazy(() => import("./screens/RateCalendar"))
 const RevenueReports = lazy(() => import("./screens/RevenueReports"))
 const OpsSLA = lazy(() => import("./screens/OpsSLA"))
 const Dashboard = lazy(() => import("./screens/Dashboard"))
+const Owner = lazy(() => import("./screens/Owner"))
 const CRS = lazy(() => import("./screens/CRS"))
 const POS = lazy(() => import("./screens/POS"))
 const Kitchen = lazy(() => import("./screens/Kitchen"))
 const PosDashboard = lazy(() => import("./screens/PosDashboard"))
 const Inventory = lazy(() => import("./screens/Inventory"))
 const AccountingExport = lazy(() => import("./screens/AccountingExport"))
+const Payables = lazy(() => import("./screens/Payables"))
+const CashForecast = lazy(() => import("./screens/CashForecast"))
+const ManagementBooks = lazy(() => import("./screens/ManagementBooks"))
 const VoidAllowanceReport = lazy(() => import("./screens/VoidAllowanceReport"))
+const AllowanceApprovals = lazy(() => import("./screens/AllowanceApprovals"))
 const TapeChart = lazy(() => import("./screens/TapeChart"))
 const Tickets = lazy(() => import("./screens/Tickets"))
 const Laundry = lazy(() => import("./screens/Laundry"))
 const MenuItems = lazy(() => import("./screens/MenuItems"))
+const Groups = lazy(() => import("./screens/Groups"))
 const KitchenPrinters = lazy(() => import("./screens/KitchenPrinters"))
 const Today = lazy(() => import("./screens/Today"))
 const ConfiguredScreen = lazy(() => import("./screens/ConfiguredScreen"))
@@ -77,41 +87,12 @@ const CashierBoard = lazy(() => import("./screens/CashierBoard"))
 const PettyCash = lazy(() => import("./screens/PettyCash"))
 const CashierShiftReport = lazy(() => import("./screens/CashierShiftReport"))
 const Ledgers = lazy(() => import("./screens/Ledgers"))
+const Receivables = lazy(() => import("./screens/Receivables"))
 const FolioHistory = lazy(() => import("./screens/FolioHistory"))
 const CurrencyDesk = lazy(() => import("./screens/CurrencyDesk"))
 import ConnectionBanner from "./components/ConnectionBanner"
+import ErrorBoundary from "./components/ErrorBoundary"
 
-
-class ErrorBoundary extends Component<
-  { children: ReactNode },
-  { error: Error | null }
-> {
-  state = { error: null as Error | null }
-
-  static getDerivedStateFromError(error: Error) {
-    return { error }
-  }
-
-  render() {
-    if (this.state.error) {
-      return (
-        <div className="mx-auto max-w-lg p-8">
-          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-            <p className="font-semibold">{translate("Something broke in the UI.")}</p>
-            <p className="mt-1 font-mono text-xs">
-              {this.state.error.message}
-            </p>
-            <button
-              className="mt-3 rounded-lg bg-rose-600 px-3 py-1.5 text-white"
-              onClick={() => location.reload()}
-            >{translate("Reload")}</button>
-          </div>
-        </div>
-      )
-    }
-    return this.props.children
-  }
-}
 
 function Splash() {
   const { t } = useT()
@@ -173,6 +154,9 @@ function CalendarScreen() {
 
 export default function App() {
   useUILanguage()
+  // guest pages and the desk keep separate languages; re-apply on crossing
+  const { pathname } = useLocation()
+  useEffect(() => syncLang(), [pathname])
   return (
     <ErrorBoundary>
       <ConnectionBanner />
@@ -216,7 +200,9 @@ export default function App() {
             element={<ConfiguredScreen config="reservationsConfig" />}
           />
           <Route path="grc/:name" element={<RegistrationCard />} />
+          <Route path="group-quote/:name" element={<GroupQuotation />} />
           <Route path="cancelled/:name" element={<CancellationLetter />} />
+          <Route path="trip/:name" element={<TripConfirmation />} />
           <Route path="guests" element={<Guests />} />
           <Route path="guests/:name" element={<GuestJourney />} />
           <Route
@@ -244,6 +230,10 @@ export default function App() {
             element={<ConfiguredScreen config="seasonsConfig" />}
           />
           <Route
+            path="long-stay"
+            element={<ConfiguredScreen config="longStayConfig" />}
+          />
+          <Route
             path="vouchers"
             element={<ConfiguredScreen config="vouchersConfig" />}
           />
@@ -269,6 +259,8 @@ export default function App() {
           <Route path="cashier/shift-report" element={<CashierShiftReport />} />
           <Route path="cashier/fx" element={<CurrencyDesk />} />
           <Route path="ledgers" element={<Ledgers />} />
+          <Route path="receivables" element={<Receivables />} />
+          <Route path="receivables/:account" element={<Receivables />} />
           <Route path="folio-history" element={<FolioHistory />} />
           <Route
             path="companies"
@@ -301,10 +293,7 @@ export default function App() {
           <Route path="banquet-catalogue" element={<BanquetCatalogue />} />
           <Route path="banquet/:name" element={<BanquetFunction />} />
           <Route path="banquet/:name/:kind" element={<BanquetDocument />} />
-          <Route
-            path="groups"
-            element={<ConfiguredScreen config="groupsConfig" />}
-          />
+          <Route path="groups" element={<Groups />} />
           <Route
             path="lost-found"
             element={<ConfiguredScreen config="lostFoundConfig" />}
@@ -329,6 +318,8 @@ export default function App() {
           <Route path="arrivals" element={<Navigate to="/in-house?tab=arrivals" replace />} />
           <Route path="departures" element={<Navigate to="/in-house?tab=departures" replace />} />
           <Route path="voids-allowances" element={<VoidAllowanceReport />} />
+          <Route path="allowances" element={<AllowanceApprovals />} />
+          <Route path="allowance-voucher/:name" element={<AllowanceVoucher />} />
           <Route path="rate-calendar" element={<RateCalendar />} />
           <Route path="revenue-reports" element={<RevenueReports />} />
           <Route path="ops-sla" element={<OpsSLA />} />
@@ -346,6 +337,7 @@ export default function App() {
             element={<ConfiguredScreen config="channelRoomMappingsConfig" />}
           />
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="owner" element={<Owner />} />
           <Route path="crs" element={<CRS />} />
           <Route path="pos" element={<POS />} />
           <Route path="pos-dashboard" element={<PosDashboard />} />
@@ -357,6 +349,10 @@ export default function App() {
           <Route path="printers" element={<KitchenPrinters />} />
           <Route path="outlets" element={<ConfiguredScreen config="outletsConfig" />} />
           <Route path="accounting-export" element={<AccountingExport />} />
+          <Route path="payables" element={<Payables />} />
+          <Route path="cash-forecast" element={<CashForecast />} />
+          <Route path="profit-and-loss" element={<ManagementBooks view="pnl" />} />
+          <Route path="balance-sheet" element={<ManagementBooks view="balance" />} />
           <Route
             path="reason-codes"
             element={<ConfiguredScreen config="reasonCodesConfig" />}

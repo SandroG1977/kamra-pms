@@ -1,4 +1,8 @@
+<<<<<<<< HEAD:kamra/public/frontend/assets/bot-D5dTkaLi.js
 import{b as t}from"./index-1vu-EyMg.js";/**
+========
+import{b as t}from"./index-CrSRnPUD.js";/**
+>>>>>>>> origin/develop:kamra/public/frontend/assets/bot-6f6NRg9U.js
  * @license lucide-react v0.525.0 - ISC
  *
  * This source code is licensed under the ISC license.
