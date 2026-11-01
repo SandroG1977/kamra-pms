@@ -1183,9 +1183,13 @@ def ask(property: str, messages):
 	if isinstance(messages, str):
 		messages = frappe.parse_json(messages)
 
-	# Route to IRC-A network if enabled (default for UnitHOS PMS branch)
+	# Route to IRC-A network if enabled, UNLESS the request originated from IRC-A itself (loop prevention)
+	is_from_irca = (
+		frappe.get_request_header("X-From-IRCA") == "true"
+		or bool(frappe.form_dict.get("from_irca"))
+	)
 	use_irca = os.getenv("USE_IRCA_AGENT", "true").lower() in ("true", "1", "yes")
-	if use_irca:
+	if use_irca and not is_from_irca:
 		irca_res = _ask_via_irca(property, messages)
 		if irca_res:
 			return irca_res
@@ -1267,9 +1271,13 @@ def ask_stream(property: str, messages):
 	if isinstance(messages, str):
 		messages = frappe.parse_json(messages)
 
-	# Route to IRC-A network if enabled (default for UnitHOS PMS branch)
+	# Route to IRC-A network if enabled, UNLESS the request originated from IRC-A itself (loop prevention)
+	is_from_irca = (
+		frappe.get_request_header("X-From-IRCA") == "true"
+		or bool(frappe.form_dict.get("from_irca"))
+	)
 	use_irca = os.getenv("USE_IRCA_AGENT", "true").lower() in ("true", "1", "yes")
-	if use_irca:
+	if use_irca and not is_from_irca:
 		irca_res = _ask_via_irca(property, messages)
 		if irca_res and irca_res.get("reply"):
 			reply_text = irca_res["reply"]
@@ -1443,9 +1451,13 @@ def help_ask(property: str, messages):
 	if isinstance(messages, str):
 		messages = frappe.parse_json(messages)
 
-	# Route to IRC-A network if enabled (default for UnitHOS PMS branch)
+	# Route to IRC-A network if enabled, UNLESS the request originated from IRC-A itself (loop prevention)
+	is_from_irca = (
+		frappe.get_request_header("X-From-IRCA") == "true"
+		or bool(frappe.form_dict.get("from_irca"))
+	)
 	use_irca = os.getenv("USE_IRCA_AGENT", "true").lower() in ("true", "1", "yes")
-	if use_irca:
+	if use_irca and not is_from_irca:
 		irca_res = _ask_via_irca(property, messages)
 		if irca_res and irca_res.get("reply"):
 			reply_text = irca_res["reply"]
