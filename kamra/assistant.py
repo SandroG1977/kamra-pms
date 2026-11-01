@@ -885,10 +885,40 @@ def _resolve(fn_name: str):
 	return getattr(api, fn_name, None)
 
 
+TOOL_CHANNELS = {
+	"reservas": {
+		"availability", "quote", "booking_options", "create_booking",
+		"find_reservations", "stay_detail", "cancellation_preview", "cancel_booking"
+	},
+	"housekeeping": {
+		"hk_queue", "hk_update_task", "set_room_hk_status", "raise_ticket"
+	},
+	"frontdesk": {
+		"front_desk_today", "find_reservations", "stay_detail", "check_in",
+		"checkout_context", "check_out", "get_folio", "post_charge", "record_payment",
+		"guest_search", "move_room", "room_move_preview"
+	}
+}
+
+
 def _tool_allowed(name: str) -> bool:
-	"""RBAC for Kamra Agent: a tool is only visible/callable when the
-	signed-in user's roles pass the SAME gate as the underlying API
-	endpoint. The model never even sees tools this user couldn't use."""
+	"""RBAC & Logical Channel Masking for Kamra Agent:
+	A tool is only visible/callable when:
+	1. The requested channel matches the tool domain (reducing prompt bloating).
+	2. The signed-in user's roles pass the API endpoint gate."""
+	ch = ""
+	try:
+		if getattr(frappe.local, "request", None):
+			ch = (frappe.get_request_header("X-Tool-Channel") or "").strip().lower()
+		if not ch and getattr(frappe.local, "form_dict", None):
+			ch = (frappe.form_dict.get("tool_channel") or "").strip().lower()
+	except Exception:
+		ch = ""
+
+	if ch and ch in TOOL_CHANNELS:
+		if name not in TOOL_CHANNELS[ch]:
+			return False
+
 	fn = _resolve(TOOLS[name][0])
 	allowed = getattr(fn, "_kamra_roles", None)
 	if not allowed:
