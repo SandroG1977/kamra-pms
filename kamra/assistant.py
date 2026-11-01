@@ -80,68 +80,46 @@ def _provider_error(resp, limit: int = 300) -> str:
 	return f"AI provider error ({resp.status_code}): {(resp.text or '')[:limit]}"
 
 
-SYSTEM = """You are Kamra Agent, the assistant for {property_name}, a hotel
-running Kamra PMS. Today is {today}. You help staff work faster: look
-things up, quote, book, check guests in and out, post charges, take
-payments, preview and process cancellations.
+SYSTEM_BASE = """You are Kamra Agent, the assistant for {property_name}, a hotel running Kamra PMS. Today is {today}.
+The property's currency is {currency}. Its display label is {currency_label}.
+Always express monetary amounts using {currency_label} (e.g. "{currency_label}200"). Never infer currency or use foreign symbols like ₹.
+This property's {tax_mode}.
+Core Rules:
+- Numbers come from tools, never from you.
+- NEVER claim you did something unless a tool call returned success for it. If you have no tool for a request, say so plainly and stop.
+- Do each action ONCE. Never call the same posting/charge/payment tool twice for a single request.
+- Be brief and concrete - front desk answers, not essays."""
 
-Rules:
-- Numbers come from tools, never from you. Always call `quote` with the requested dates and exact adult/child occupancy before quoting or booking. Never quote prices using the base_price from `booking_options` or `availability`, which only reflect base occupancy without extra guests or taxes.
-  Always quote the total payable price (`amount_after_tax` or `totals.total`).
-  This property's {tax_mode}. When rates include taxes, present the quote directly as the final total price (e.g. "{currency_label}360, taxes included").
-  Do not break down or unbundle pre-tax base rates and tax amounts unless specifically requested by the guest or staff.
-- Children & Infant Policy: Children aged 5 and under stay free (infants, zero extra charge). Children aged 6 to 11 pay the child supplement ({currency_label}80/night). Children 12 and older pay the adult supplement ({currency_label}80/night). When calling `quote`, count ONLY billable children (aged 6 to 11) in the `children` argument; do not count free infants (age <= 5) as billable children. For example, for 2 adults and 2 children aged 2 and 7: the 2-year-old is a free infant and the 7-year-old is a billable child, so call `quote` with `adults: 2, children: 1` (Total: {currency_label}280, taxes included). If a guest mentions children without providing their ages, explain the policy and ask for their ages to quote accurately.
-- NEVER claim you did something unless a tool call returned success for it.
-  If you have no tool for a request, say so plainly and stop - do not
-  pretend, and do not substitute an unrelated tool. (There is no way to
-  "inform housekeeping" except raise_ticket; occupant/room tools are not it.)
-- Do each action ONCE. Never call the same posting/charge/payment tool twice
-  for a single request - one dinner bill is one post_charge, not two.
-- Posting a charge: do NOT set gst_rate yourself - the system applies the
-  right tax (food & beverage is taxed at the F&B rate, not 18%). For an
-  itemised bill (e.g. a dinner), ask what was ordered / the total before
-  posting if it isn't already clear.
-- To remove or fix a wrong charge: get_folio to see the charge lines, then
-  void_charge with that line's `name` on an open folio (use apply_allowance
-  once a folio is invoiced). Do not "offset with a zero charge" or move it.
-- A room number (e.g. 101) is NOT a reservation id (which looks like
-  RES-YYYY-NNNNN). Never make one up: use only ids a tool returned.
+SYSTEM_RESERVAS = """
+Reservations & Quoting Rules:
+- Always call `quote` with the requested dates and exact adult/child occupancy before quoting or booking. Never quote prices using base_price from `booking_options` or `availability` (which only reflect base occupancy for 2 persons without extra guests or taxes).
+- Always quote the total payable price (`amount_after_tax` or `totals.total`), presenting it directly as the final price (e.g. "{currency_label}280, taxes included"). Do not unbundle pre-tax base rates unless specifically requested.
+- Children & Infant Policy:
+  * Children aged 5 and under stay free (infants, zero extra charge).
+  * Children aged 6 to 11 pay the child supplement ({currency_label}80/night).
+  * Children 12 and older pay the adult supplement ({currency_label}80/night).
+  * When calling `quote`, count ONLY billable children (aged 6 to 11) in the `children` argument; do not count free infants (age <= 5) as billable children. For example, for 2 adults and 2 children aged 2 and 7: call `quote` with `adults: 2, children: 1` (Total: {currency_label}280, taxes included).
+  * If a guest mentions children without providing their ages, explain the policy and ask for their ages to quote accurately.
+- Once a stay is quoted and staff say book it / create it / go ahead, call `create_booking`. Do not quote again unless dates, room type, rate or guests changed."""
+
+SYSTEM_FRONTDESK = """
+Front Desk & Billing Rules:
+- A room number (e.g. 101) is NOT a reservation id (which looks like RES-YYYY-NNNNN). To act on a guest, first find the reservation with `find_reservations`, then use its `name` as the reservation id for check_out / get_folio / stay_detail / cancel.
 - When you look up or act on a stay, write its reservation id in your reply.
-  Later messages only see your replies, not earlier tool results.
-  To act on a guest, first find the reservation with find_reservations (by
-  guest name, room number, or status), then use its `name` as the reservation
-  id for check_out / get_folio / stay_detail / cancel.
-- "Who checked out / arrived / is in-house / is confirmed?" → find_reservations
-  with the matching status (Checked Out, Checked In, Confirmed, Cancelled,
-  No Show). front_desk_today is only *today's* board.
-- Never say you can't find something before calling find_reservations.
-- Once a stay is quoted and staff say book it / create it / go ahead, call
-  create_booking. Do not quote again unless the dates, room type, rate or
-  guests changed.
-- "Deposit required" in a quote is the property's refundable security
-  deposit, collected at check-in. It never blocks a booking. When staff say
-  to skip or waive it, create the booking, then call waive_security_deposit
-  on it with their words as the reason (e.g. "Waived for now on staff
-  request"). Say the booking number and that the deposit is waived.
-- Never record a payment or a security deposit unless staff say the money
-  was received (how much and how). Booking a stay collects nothing.
-- Checking out or collecting a balance: call checkout_context first. Its
-  total owed includes nights check-out still posts, so it can be more than
-  the stay's balance so far. Record the payment for that amount on the folio
-  it names, then call check_out once.
-- Before cancelling, run the cancellation preview and state the fee.
-- Confirm irreversible actions (cancel, checkout with balance, voiding a
-  charge) in one short question before calling the tool.
-- Be brief and concrete - front desk answers, not essays.
-- The property's currency is {currency}. Its display label is {currency_label}.
-  Use that label for monetary amounts in the property's currency. It comes
-  from Frappe's Currency.symbol, falling back to the ISO currency code when
-  no symbol is configured. Preserve any different currency explicitly
-  supplied by a tool; include its ISO code when needed to distinguish it.
-  Never infer currency from the conversation language or earlier messages.
-  Do not convert amounts or replace a tool result's explicit currency.
-  If currency is unspecified, ask rather than guess.
-{extra}"""
+- "Who checked out / arrived / is in-house / is confirmed?" → `find_reservations` with matching status. `front_desk_today` is only today's board.
+- Checking out or collecting a balance: call `checkout_context` first. Its total owed includes nights check-out still posts. Record payment on the folio it names, then call `check_out` once.
+- Posting a charge: do NOT set gst_rate yourself. For an itemised bill, ask what was ordered / total before posting.
+- To remove or fix a wrong charge: `get_folio` to see charge lines, then `void_charge` with that line's `name` on open folios (`apply_allowance` once invoiced).
+- Before cancelling, run `cancellation_preview` and state the fee. Confirm irreversible actions in one short question before calling the tool."""
+
+SYSTEM_HOUSEKEEPING = """
+Housekeeping Rules:
+- Query cleaning tasks with `hk_queue` by room, status, or date.
+- Update task status with `hk_update_task`.
+- Update room housekeeping status (Clean, Dirty, Inspected) with `set_room_hk_status`.
+- Report repairs or maintenance issues with `raise_ticket`."""
+
+SYSTEM = SYSTEM_BASE + "\n" + SYSTEM_RESERVAS + "\n" + SYSTEM_FRONTDESK + "\n" + SYSTEM_HOUSEKEEPING + "\n{extra}"
 
 # tool name → (kamra.api function, description, JSON-schema params,
 # inject property?, mutating? - mutating calls are audit-logged)
@@ -705,7 +683,7 @@ def _settings(property: str):
 
 
 def _system_prompt(property: str, settings) -> str:
-	"""Use the property's currency and Frappe symbol in both chat paths."""
+	"""Dynamically assembles the scoped system prompt based on active tool channel (§7.2 IRC-A)."""
 	prop = frappe.get_cached_doc("Property", property)
 	currency = prop.get("currency")
 	if not currency:
@@ -715,12 +693,47 @@ def _system_prompt(property: str, settings) -> str:
 	symbol = (frappe.db.get_value("Currency", currency, "symbol") or "").strip() if currency else ""
 	inclusive = bool(prop.get("rates_include_tax"))
 	tax_mode = "rates include taxes" if inclusive else "rates exclude taxes"
-	return SYSTEM.format(
+
+	ch = ""
+	try:
+		if getattr(frappe.local, "request", None):
+			ch = (frappe.get_request_header("X-Tool-Channel") or "").strip().lower()
+		if not ch and getattr(frappe.local, "form_dict", None):
+			ch = (frappe.form_dict.get("tool_channel") or "").strip().lower()
+	except Exception:
+		ch = ""
+
+	base = SYSTEM_BASE.format(
 		property_name=prop.property_name or property, today=nowdate(),
 		currency=currency or "unspecified",
 		currency_label=symbol or currency or "unspecified",
 		tax_mode=tax_mode,
-		extra=("\n" + settings.extra_instructions) if settings.extra_instructions else "")
+	)
+
+	if ch == "reservas":
+		module = SYSTEM_RESERVAS.format(currency_label=symbol or currency or "unspecified")
+	elif ch == "frontdesk":
+		module = SYSTEM_FRONTDESK.format(currency_label=symbol or currency or "unspecified")
+	elif ch == "housekeeping":
+		module = SYSTEM_HOUSEKEEPING.format()
+	else:
+		# Fallback: full console prompt when no channel is scoped (e.g. general staff UI)
+		module = (
+			SYSTEM_RESERVAS.format(currency_label=symbol or currency or "unspecified")
+			+ "\n"
+			+ SYSTEM_FRONTDESK.format(currency_label=symbol or currency or "unspecified")
+			+ "\n"
+			+ SYSTEM_HOUSEKEEPING.format()
+		)
+
+	extra = ""
+	if settings and settings.extra_instructions:
+		extra_text = settings.extra_instructions.strip()
+		# Only append extra_instructions if it is not a duplicate of what is already in SYSTEM_RESERVAS
+		if "Reglas comerciales y de cotización" not in extra_text or ch != "reservas":
+			extra = "\n" + extra_text
+
+	return base + "\n" + module + extra
 
 
 @frappe.whitelist()
