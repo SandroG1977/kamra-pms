@@ -8,10 +8,40 @@ Agent Action Log. If the model is wrong, the tools refuse.
 """
 
 import json
+import os
 
 import frappe
 import requests
 from frappe.utils import cint, nowdate
+
+try:
+	from langsmith import traceable, get_current_run_tree
+except ImportError:
+	def traceable(*args, **kwargs):
+		def decorator(f):
+			return f
+		return decorator
+	def get_current_run_tree():
+		return None
+
+# Ensure LangSmith defaults for UnitHOS PMS from env or site_config
+langsmith_key = os.getenv("LANGSMITH_API_KEY")
+if not langsmith_key:
+	try:
+		langsmith_key = getattr(frappe, "conf", None) and frappe.conf.get("langsmith_api_key")
+		if langsmith_key:
+			os.environ["LANGSMITH_API_KEY"] = langsmith_key
+	except Exception:
+		pass
+
+if not os.getenv("LANGSMITH_PROJECT"):
+	os.environ["LANGSMITH_PROJECT"] = (
+		getattr(frappe, "conf", None) and frappe.conf.get("langsmith_project")
+	) or "BFA-UNITHOS"
+if not os.getenv("LANGSMITH_TRACING"):
+	os.environ["LANGSMITH_TRACING"] = "true"
+if not os.getenv("LANGSMITH_ENDPOINT"):
+	os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
 
 from kamra.assistant_privacy import processor_disclosure, scrub_for_llm
 from kamra.authz import require_roles
@@ -900,6 +930,19 @@ def _post_chat(base: str, headers: dict, body: dict, *, stream: bool = False):
 	                     timeout=TIMEOUT, stream=stream)
 
 
+@traceable(run_type="llm", name="OpenAI Chat Completion")
+def _llm_call(model: str, messages: list, tools: list | None, base: str, headers: dict, body: dict):
+	"""Traceable Chat Completion call that reports token usage and cost to LangSmith."""
+	resp = _post_chat(base, headers, body, stream=False)
+	if resp.status_code == 200:
+		try:
+			return resp.json()
+		except Exception:
+			return {"error": "Invalid JSON response", "status_code": 200}
+	return {"error": resp.text, "status_code": resp.status_code}
+
+
+
 # a ticket the copilot raises is an agent's ticket - the same source the MCP
 # create_ticket tool stamps, so reports tell it apart from staff-typed ones
 _FIXED_ARGS = {"raise_ticket": {"source": "AI Agent"}}
@@ -1014,7 +1057,14 @@ def _missing_refs(text: str) -> str:
 	return f"\n\nRef: {', '.join(missing)}" if missing else ""
 
 
+@traceable(run_type="tool")
 def _run_tool(name: str, args: dict, property: str):
+	try:
+		rt = get_current_run_tree()
+		if rt:
+			rt.name = f"tool:{name}"
+	except Exception:
+		pass
 	if not _tool_allowed(name):
 		frappe.throw("Your role doesn't include this action.",
 		             frappe.PermissionError)
@@ -1073,12 +1123,73 @@ def _tool_json_for_provider(result, settings):
 	return frappe.as_json(scrub_for_llm(result, strict=strict))
 
 
+@traceable(run_type="chain", name="UnitHOS IRC-A Gateway Call")
+def _ask_via_irca(property: str, messages: list):
+	"""Query the IRC-A network via Gateway /invoke endpoint."""
+	gateway_url = os.getenv("IRCA_GATEWAY_URL", "http://host.docker.internal:8000").rstrip("/")
+	if not messages:
+		return None
+	last_msg = messages[-1]
+	query = last_msg.get("content", "") if isinstance(last_msg, dict) else str(last_msg)
+	if not query.strip():
+		return None
+
+	try:
+		resp = requests.post(
+			f"{gateway_url}/invoke",
+			params={"query": query},
+			headers={
+				"x-channels": "#tier-1,#pms,#reservas,#operaciones,atencion",
+				"x-node-id": "unithos-pms-ui"
+			},
+			json={"property": property},
+			timeout=25
+		)
+		if resp.status_code == 200:
+			data = resp.json()
+			result = data.get("result", {})
+			output = result.get("output", {})
+			if isinstance(output, dict):
+				text = output.get("text") or output.get("message") or ""
+			elif isinstance(output, str):
+				text = output
+			else:
+				text = ""
+
+			if not text:
+				msg = result.get("message", {})
+				parts = msg.get("parts", [])
+				if parts and isinstance(parts[0], dict):
+					text = parts[0].get("text", "")
+
+			if text:
+				return {
+					"reply": text,
+					"actions": result.get("actions", []),
+					"cards": result.get("cards", [])
+				}
+	except Exception as e:
+		frappe.logger("assistant").warning(f"IRC-A invoke error: {e}")
+	return None
+
+
 @frappe.whitelist()
 @require_roles("Front Desk", "Finance", "Revenue Manager")
+@traceable(run_type="chain", name="UnitHOS PMS Agent")
 def ask(property: str, messages):
 	"""One Kamra Agent turn: history in, answer out. The model may call
 	governed tools along the way; every call is returned so the UI can
 	show what actually happened."""
+	if isinstance(messages, str):
+		messages = frappe.parse_json(messages)
+
+	# Route to IRC-A network if enabled (default for UnitHOS PMS branch)
+	use_irca = os.getenv("USE_IRCA_AGENT", "true").lower() in ("true", "1", "yes")
+	if use_irca:
+		irca_res = _ask_via_irca(property, messages)
+		if irca_res:
+			return irca_res
+
 	s = _settings(property)
 	if not (s and s.enabled):
 		frappe.throw("The AI assistant is not enabled for this property - "
@@ -1102,11 +1213,13 @@ def ask(property: str, messages):
 	frappe.local.kamra_chat_refs = []
 	frappe.local.kamra_chat_quote = None
 	for _ in range(MAX_TOOL_ROUNDS):
-		resp = _post_chat(base, headers, chat_payload(
-			model, convo, tools=_tool_defs(), temperature=0.2))
-		if resp.status_code != 200:
-			frappe.throw(_provider_error(resp))
-		msg = resp.json()["choices"][0]["message"]
+		llm_res = _llm_call(
+			model, convo, _tool_defs(), base, headers,
+			chat_payload(model, convo, tools=_tool_defs(), temperature=0.2)
+		)
+		if "error" in llm_res:
+			frappe.throw(f"AI provider error ({llm_res.get('status_code')}): {str(llm_res.get('error', ''))[:200]}")
+		msg = llm_res["choices"][0]["message"]
 		convo.append(msg)
 
 		calls = msg.get("tool_calls") or []
@@ -1138,6 +1251,7 @@ def ask(property: str, messages):
 
 @frappe.whitelist(methods=["POST"])
 @require_roles("Front Desk", "Finance", "Revenue Manager")
+@traceable(run_type="chain", name="UnitHOS PMS Agent (Stream)")
 def ask_stream(property: str, messages):
 	"""Streaming Kamra Agent turn (Server-Sent Events). Governed tools run FIRST
 	(they need the DB, which the request context still holds), emitting an
@@ -1149,6 +1263,27 @@ def ask_stream(property: str, messages):
 	{message} · done {}
 	"""
 	from werkzeug.wrappers import Response
+
+	if isinstance(messages, str):
+		messages = frappe.parse_json(messages)
+
+	# Route to IRC-A network if enabled (default for UnitHOS PMS branch)
+	use_irca = os.getenv("USE_IRCA_AGENT", "true").lower() in ("true", "1", "yes")
+	if use_irca:
+		irca_res = _ask_via_irca(property, messages)
+		if irca_res and irca_res.get("reply"):
+			reply_text = irca_res["reply"]
+			def gen_irca():
+				for a in irca_res.get("actions", []):
+					yield _sse("action", a)
+				for card in irca_res.get("cards", []):
+					yield _sse("card", card)
+				step = 15
+				for i in range(0, len(reply_text), step):
+					yield _sse("token", {"text": reply_text[i:i+step]})
+				yield _sse("done", {})
+
+			return Response(gen_irca(), mimetype="text/event-stream")
 
 	s = _settings(property)
 	if not (s and s.enabled):
@@ -1172,14 +1307,17 @@ def ask_stream(property: str, messages):
 	frappe.local.kamra_chat_refs = []
 	frappe.local.kamra_chat_quote = None
 	for _ in range(MAX_TOOL_ROUNDS):
-		resp = _post_chat(base, headers, chat_payload(
-			model, convo, tools=_tool_defs(), temperature=0.2))
-		if resp.status_code != 200:
-			if _out_of_credit(resp):
+		llm_res = _llm_call(
+			model, convo, _tool_defs(), base, headers,
+			chat_payload(model, convo, tools=_tool_defs(), temperature=0.2)
+		)
+		if "error" in llm_res:
+			err_str = str(llm_res.get("error", "")).lower()
+			if any(m in err_str for m in ("insufficient_quota", "billing", "credit")):
 				return Response(_sse("error", _no_credit()) + _sse("done", {}),
 				                mimetype="text/event-stream")
-			frappe.throw(f"AI provider error ({resp.status_code}): {resp.text[:200]}")
-		msg = resp.json()["choices"][0]["message"]
+			frappe.throw(f"AI provider error ({llm_res.get('status_code')}): {str(llm_res.get('error', ''))[:200]}")
+		msg = llm_res["choices"][0]["message"]
 		calls = msg.get("tool_calls") or []
 		if not calls:
 			break  # data gathered; regenerate the answer streamed (no tools)
@@ -1301,6 +1439,27 @@ def help_ask(property: str, messages):
 	how to use Kamra, grounded in the app's features. Reuses the property's
 	AI key. Events: token {text} · error {message} · done {}."""
 	from werkzeug.wrappers import Response
+
+	if isinstance(messages, str):
+		messages = frappe.parse_json(messages)
+
+	# Route to IRC-A network if enabled (default for UnitHOS PMS branch)
+	use_irca = os.getenv("USE_IRCA_AGENT", "true").lower() in ("true", "1", "yes")
+	if use_irca:
+		irca_res = _ask_via_irca(property, messages)
+		if irca_res and irca_res.get("reply"):
+			reply_text = irca_res["reply"]
+			def gen_irca():
+				for a in irca_res.get("actions", []):
+					yield _sse("action", a)
+				for card in irca_res.get("cards", []):
+					yield _sse("card", card)
+				step = 15
+				for i in range(0, len(reply_text), step):
+					yield _sse("token", {"text": reply_text[i:i+step]})
+				yield _sse("done", {})
+
+			return Response(gen_irca(), mimetype="text/event-stream")
 
 	s = _settings(property)
 	if not (s and s.enabled):
