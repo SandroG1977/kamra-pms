@@ -219,14 +219,14 @@ export default function AppShell() {
   const [property, setProperty] = useState(getCurrentProperty())
   const [demoMode, setDemoMode] = useState(false)
   const [build, setBuild] = useState<string | null>(null)
-  // co-branding: the hotel's name and logo on top, Kamra PMS kept beneath
+  // co-branding: the hotel's name and logo on top, UnitHOS PMS kept beneath
   const [brand, setBrand] = useState<{ name: string | null; logo: string | null }>({ name: null, logo: null })
 
   useEffect(() => {
     getSiteInfo().then((info) => {
       setBuild(versionLabel(info))
       setBrand({ name: info.brand_name ?? null, logo: info.brand_logo ?? null })
-      document.title = info.brand_name ? `${info.brand_name} · Kamra PMS` : "Kamra PMS"
+      document.title = info.brand_name ? `${info.brand_name} · UnitHOS PMS` : "UnitHOS PMS"
     })
   }, [])
 
