@@ -90,6 +90,7 @@ Rules:
   Always quote the total payable price (`amount_after_tax` or `totals.total`).
   This property's {tax_mode}. When rates include taxes, present the quote directly as the final total price (e.g. "{currency_label}360, taxes included").
   Do not break down or unbundle pre-tax base rates and tax amounts unless specifically requested by the guest or staff.
+- Children & Infant Policy: Children aged 5 and under stay free (infants, zero extra charge). Children aged 6 to 11 pay the child supplement ({currency_label}80/night). Children 12 and older pay the adult supplement ({currency_label}80/night). When calling `quote`, count ONLY billable children (aged 6 to 11) in the `children` argument; do not count free infants (age <= 5) as billable children. For example, for 2 adults and 2 children aged 2 and 7: the 2-year-old is a free infant and the 7-year-old is a billable child, so call `quote` with `adults: 2, children: 1` (Total: {currency_label}280, taxes included). If a guest mentions children without providing their ages, explain the policy and ask for their ages to quote accurately.
 - NEVER claim you did something unless a tool call returned success for it.
   If you have no tool for a request, say so plainly and stop - do not
   pretend, and do not substitute an unrelated tool. (There is no way to
@@ -1130,9 +1131,26 @@ def _ask_via_irca(property: str, messages: list):
 	if not messages:
 		return None
 	last_msg = messages[-1]
-	query = last_msg.get("content", "") if isinstance(last_msg, dict) else str(last_msg)
-	if not query.strip():
+	last_query = last_msg.get("content", "") if isinstance(last_msg, dict) else str(last_msg)
+	if not last_query.strip():
 		return None
+
+	# If there are prior conversation turns, preserve the multi-turn context
+	if len(messages) > 1:
+		history_lines = []
+		for m in messages[:-1][-6:]:
+			role_label = "Huésped" if m.get("role") == "user" else "Asistente"
+			content_text = m.get("content", "").strip()
+			if content_text:
+				history_lines.append(f"{role_label}: {content_text}")
+		context_block = "\n".join(history_lines)
+		query = f"[Contexto de la conversación:\n{context_block}]\n\nConsulta actual del huésped: {last_query}"
+	else:
+		query = last_query
+
+	user_id = getattr(getattr(frappe, "session", None), "user", None) or "guest"
+	prop_key = frappe.scrub(property or "default")
+	session_id = f"pms-session-{user_id}-{prop_key}"
 
 	try:
 		resp = requests.post(
@@ -1142,7 +1160,11 @@ def _ask_via_irca(property: str, messages: list):
 				"x-channels": "#tier-1,#pms,#reservas,#operaciones,atencion",
 				"x-node-id": "unithos-pms-ui"
 			},
-			json={"property": property},
+			json={
+				"property": property,
+				"session_id": session_id,
+				"context_id": session_id
+			},
 			timeout=25
 		)
 		if resp.status_code == 200:
