@@ -1169,7 +1169,7 @@ def _tool_json_for_provider(result, settings):
 
 @traceable(run_type="chain", name="UnitHOS IRC-A Gateway Call")
 def _ask_via_irca(property: str, messages: list):
-	"""Query the IRC-A network via Gateway /invoke endpoint."""
+	"""Query the IRC-A network via Gateway /invoke endpoint directed to Agente Empleado."""
 	gateway_url = os.getenv("IRCA_GATEWAY_URL", "http://host.docker.internal:8000").rstrip("/")
 	if not messages:
 		return None
@@ -1182,31 +1182,38 @@ def _ask_via_irca(property: str, messages: list):
 	if len(messages) > 1:
 		history_lines = []
 		for m in messages[:-1][-6:]:
-			role_label = "Huésped" if m.get("role") == "user" else "Asistente"
+			role_label = "Empleado" if m.get("role") == "user" else "Asistente"
 			content_text = m.get("content", "").strip()
 			if content_text:
 				history_lines.append(f"{role_label}: {content_text}")
 		context_block = "\n".join(history_lines)
-		query = f"[Contexto de la conversación:\n{context_block}]\n\nConsulta actual del huésped: {last_query}"
+		query = f"[Contexto de la conversación:\n{context_block}]\n\nInstrucción del empleado: {last_query}"
 	else:
 		query = last_query
 
-	user_id = getattr(getattr(frappe, "session", None), "user", None) or "guest"
+	user_id = getattr(getattr(frappe, "session", None), "user", None) or "staff"
 	prop_key = frappe.scrub(property or "default")
 	session_id = f"pms-session-{user_id}-{prop_key}"
+
+	target_agent = os.getenv("IRCA_EMPLOYEE_AGENT_ID", "agente-empleado")
 
 	try:
 		resp = requests.post(
 			f"{gateway_url}/invoke",
-			params={"query": query},
+			params={
+				"query": query,
+				"target_node": target_agent
+			},
 			headers={
-				"x-channels": "#tier-1,#pms,#reservas,#operaciones,atencion",
+				"x-channels": "#tier-1,#pms,#reservas,#operaciones,gerencia",
 				"x-node-id": "unithos-pms-ui"
 			},
 			json={
 				"property": property,
 				"session_id": session_id,
-				"context_id": session_id
+				"context_id": session_id,
+				"target_node": target_agent,
+				"tenant_id": property
 			},
 			timeout=25
 		)
@@ -1249,10 +1256,15 @@ def ask(property: str, messages):
 		messages = frappe.parse_json(messages)
 
 	# Route to IRC-A network if enabled, UNLESS the request originated from IRC-A itself (loop prevention)
-	is_from_irca = (
-		frappe.get_request_header("X-From-IRCA") == "true"
-		or bool(frappe.form_dict.get("from_irca"))
-	)
+	is_from_irca = False
+	try:
+		if getattr(frappe.local, "request", None):
+			is_from_irca = (
+				frappe.get_request_header("X-From-IRCA") == "true"
+				or bool(getattr(frappe.local, "form_dict", {}).get("from_irca"))
+			)
+	except Exception:
+		is_from_irca = False
 	use_irca = os.getenv("USE_IRCA_AGENT", "true").lower() in ("true", "1", "yes")
 	if use_irca and not is_from_irca:
 		irca_res = _ask_via_irca(property, messages)
@@ -1337,10 +1349,15 @@ def ask_stream(property: str, messages):
 		messages = frappe.parse_json(messages)
 
 	# Route to IRC-A network if enabled, UNLESS the request originated from IRC-A itself (loop prevention)
-	is_from_irca = (
-		frappe.get_request_header("X-From-IRCA") == "true"
-		or bool(frappe.form_dict.get("from_irca"))
-	)
+	is_from_irca = False
+	try:
+		if getattr(frappe.local, "request", None):
+			is_from_irca = (
+				frappe.get_request_header("X-From-IRCA") == "true"
+				or bool(getattr(frappe.local, "form_dict", {}).get("from_irca"))
+			)
+	except Exception:
+		is_from_irca = False
 	use_irca = os.getenv("USE_IRCA_AGENT", "true").lower() in ("true", "1", "yes")
 	if use_irca and not is_from_irca:
 		irca_res = _ask_via_irca(property, messages)
@@ -1517,10 +1534,15 @@ def help_ask(property: str, messages):
 		messages = frappe.parse_json(messages)
 
 	# Route to IRC-A network if enabled, UNLESS the request originated from IRC-A itself (loop prevention)
-	is_from_irca = (
-		frappe.get_request_header("X-From-IRCA") == "true"
-		or bool(frappe.form_dict.get("from_irca"))
-	)
+	is_from_irca = False
+	try:
+		if getattr(frappe.local, "request", None):
+			is_from_irca = (
+				frappe.get_request_header("X-From-IRCA") == "true"
+				or bool(getattr(frappe.local, "form_dict", {}).get("from_irca"))
+			)
+	except Exception:
+		is_from_irca = False
 	use_irca = os.getenv("USE_IRCA_AGENT", "true").lower() in ("true", "1", "yes")
 	if use_irca and not is_from_irca:
 		irca_res = _ask_via_irca(property, messages)
