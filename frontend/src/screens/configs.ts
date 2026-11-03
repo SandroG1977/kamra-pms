@@ -11,7 +11,7 @@ const HkTaskMediaPanel = lazy(() =>
   import("../components/HkMedia").then((m) => ({ default: m.HkTaskMediaPanel })),
 )
 const ReservationDetail = lazy(() => import("./ReservationDetail"))
-import { cur, locale } from "../lib/money"
+import { cur, locale, sellsAlcohol } from "../lib/money"
 
 export const roomsConfig: ScreenConfig = {
   doctype: "Room",
@@ -147,6 +147,54 @@ export const seasonsConfig: ScreenConfig = {
     { field: "no_small_group", label: "No small-group rate", type: "check", hint: "Small parties pay the house rate on these dates, as on a weekend" },
     { field: "is_holiday", label: "Holiday / long weekend", type: "check", hint: "Quotes say these are holiday dates" },
     { field: "disabled", label: "Disabled", type: "check", hint: "Tick to deactivate; clear to activate" },
+  ],
+}
+
+export const holidayPackagesConfig: ScreenConfig = {
+  doctype: "Holiday Package",
+  title: "Packages",
+  description:
+    "Fixed holiday packages with tiered occupancy pricing (Carnaval, Réveillon, long weekends) and OTA markup strategies.",
+  propertyScoped: true,
+  orderBy: "start_date asc",
+  columns: [
+    { field: "package_name", label: "Package" },
+    { field: "start_date", label: "From" },
+    { field: "end_date", label: "To" },
+    { field: "package_nights", label: "Nights" },
+    { field: "extra_night_percent", label: "Extra %" },
+    { field: "price_2_pax", label: "Base (2p)" },
+    { field: "price_3_pax", label: "3p" },
+    { field: "price_4_pax", label: "4p" },
+    { field: "extra_night_price", label: "Extra Fixed" },
+    { field: "flyer_image", label: "Flyer" },
+    { field: "ota_strategy", label: "OTA Strategy" },
+    { field: "ota_daily_rate", label: "OTA Rate" },
+    { field: "disabled", label: "Status", statusCheck: true },
+  ],
+  form: [
+    { field: "package_name", label: "Name", type: "data", required: true },
+    { field: "room_type", label: "Room type (blank = all)", type: "link", linkDoctype: "Room Type" },
+    { field: "start_date", label: "Start date", type: "date", required: true },
+    { field: "end_date", label: "End date (inclusive)", type: "date", required: true },
+    { field: "package_nights", label: "Package nights", type: "int", required: true, hint: "Duration of package in nights (e.g. 3)" },
+    { field: "extra_night_percent", label: "Extra night %", type: "float", hint: "% of package daily rate for extra nights (e.g. 50% or 100%). Automatically scales for 2p, 3p, 4p" },
+    { field: "extra_night_price", label: "Extra night fixed override", type: "float", hint: "Optional fixed rate override instead of %" },
+    { field: "price_1_pax", label: "Package rate 1 pax (Single)", type: "float", hint: "Blank = use 2 pax base rate" },
+    { field: "price_2_pax", label: "Package rate 2 pax (Base)", type: "float", required: true },
+    { field: "price_3_pax", label: "Package rate 3 pax", type: "float" },
+    { field: "price_4_pax", label: "Package rate 4 pax", type: "float" },
+    { field: "price_5_pax", label: "Package rate 5 pax", type: "float" },
+    { field: "extra_adult_price", label: "Extra adult package rate", type: "float" },
+    { field: "child_price", label: "Child package rate", type: "float" },
+    { field: "flyer_image", label: "Flyer / Promo image", type: "image", hint: "Flyer or banner image sent to guests by WhatsApp agents" },
+    { field: "ota_strategy", label: "OTA strategy", type: "select", options: ["Markup", "Stop Sell", "None"] },
+    { field: "ota_daily_rate", label: "OTA daily rate", type: "float", hint: "Nightly rate pushed to OTAs during package" },
+    { field: "advance_percent", label: "Advance deposit %", type: "float", hint: "Deposit required (e.g. 50 or 100)" },
+    { field: "non_refundable", label: "Non-refundable", type: "check" },
+    { field: "inclusions", label: "Inclusions", type: "data", hint: "Breakfast, gala dinner, late checkout" },
+    { field: "priority", label: "Priority", type: "int" },
+    { field: "disabled", label: "Disabled", type: "check" },
   ],
 }
 
@@ -755,7 +803,7 @@ export const menuItemsConfig: ScreenConfig = {
       options: ["Egg", "Dairy", "Nuts", "Peanuts", "Gluten", "Soy", "Shellfish", "Fish", "Sesame", "Sulphites"],
       hint: "Edit the list under Settings → F&B → Menu master lists. Matched against the guest allergy note on the kitchen display." },
     { field: "is_veg", label: "Vegetarian", type: "check" },
-    { field: "is_alcohol", label: "Alcohol", type: "check",
+    { field: "is_alcohol", label: "Alcohol", type: "check", dependsOn: sellsAlcohol,
       hint: "Alcohol always bills the guest folio, never the company" },
     { field: "available", label: "Available", type: "check" },
   ],
@@ -916,7 +964,7 @@ export const transactionCodesConfig: ScreenConfig = {
       hint: "e.g. Rooms, F&B, Other - used on ledgers and exports." },
     { field: "subgroup", label: "Subgroup", type: "data" },
     { field: "default_tax_rate", label: "Default tax %", type: "float" },
-    { field: "is_alcohol", label: "Alcohol", type: "check",
+    { field: "is_alcohol", label: "Alcohol", type: "check", dependsOn: sellsAlcohol,
       hint: "Alcohol never bills a Company folio." },
     { field: "charge_type", label: "Legacy charge type", type: "select",
       options: [

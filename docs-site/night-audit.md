@@ -8,7 +8,7 @@ on its own every night at each property's set time (03:00 unless you
 change it). Front Desk, Finance, Night Auditor and Hotel Admin
 users can run it.
 
-![The End of Day wizard: the twelve steps on the left with their status, and the Prepare step showing the business date, server date, property time and every pre-check with its severity](/img/night-audit/wizard.png)
+![The night audit wizard: the twelve steps on the left with their status, and the Prepare step showing the business date, server date, property time and every pre-check with its severity](/img/night-audit/wizard.png)
 
 ## Before you start
 
@@ -26,13 +26,13 @@ users can run it.
 
 ## Open End of Day
 
-Open **Finance → End of Day** (also under **Front Desk**, or type *night
-audit*, *end of day* or *EOD* in search, Ctrl/Cmd+K). **Manage End of
-Day** shows one card per property: its business date and local time,
+Open **Finance → Night Audit** (also under **Front Desk**, or type *night
+audit*, *end of day* or *EOD* in search, Ctrl/Cmd+K). **Manage Night
+Audit** shows one card per property: its business date and local time,
 arrivals and departures still pending, open cashiers, open POS bills, and
 **Ready** or the number of blockers.
 
-![Manage End of Day: one card per property with arrivals and departures pending, open cashiers and open POS bills, and the audit history below](/img/night-audit/manage.png)
+![Manage Night Audit: one card per property with arrivals and departures pending, open cashiers and open POS bills, and the audit history below](/img/night-audit/manage.png)
 
 Press **Manage** on the property (it reads **Continue** if you already
 started tonight). Your progress is saved as you go, so you can leave and
@@ -73,13 +73,15 @@ business date can be marked.
 Three checks block the audit by default: open tills, open restaurant
 bills, and guests due out who are still checked in. A blocked step shows
 a red sign and has no **Continue** button. Either fix it (check the guest
-out, settle the restaurant bill, close the till), or acknowledge it:
+out, settle the restaurant bill, close the till), or override it:
 
-1. Type the reason in the box under the list, for example *"Late
+1. Read **How to clear this** under the step: the usual fixes, **Ask Kamra
+   Agent to help**, and what happens **If you override**.
+2. Type the reason in the box under the list, for example *"Late
    checkouts approved by the duty manager"*.
-2. Press **Acknowledge**.
+3. Press **Override with reason**.
 
-![Step 3, Departures not checked out: two guests due out still in house, the Quick check out button and the box to acknowledge the blocker with a reason](/img/night-audit/departures.png)
+![Step 3, Departures not checked out: the guests due out still in house, How to clear this with Ask Kamra Agent to help, and the list of stays](/img/night-audit/departures.png)
 
 Your name, the time and the reason are saved on the audit, printed in the
 pack and written to the Activity log. Warning checks never block: they
@@ -135,6 +137,14 @@ arrival or the fee is waived for an OTA booking.
 The audit also removes waitlist entries two days past their requested
 departure.
 
+## Email reports after the audit
+
+Any custom report can go out by email as soon as the audit closes the
+day: open it under **Reports → Custom reports**, set **Email schedule** to
+**After night audit**, add the recipients and **Save**. Each one is sent
+for the business date just closed, as a CSV. See
+[Build a custom report](/reports#build-a-custom-report).
+
 ## Print the audit pack
 
 Step 11 lists the final reports on the left. Pick one to read it, then
@@ -166,7 +176,7 @@ Step 11 lists the final reports on the left. Pick one to read it, then
 
 The pack is saved on the audit when it runs, so reprinting a past night
 gives exactly what was printed that night. Find past audits in **Audit
-history** at the bottom of **Manage End of Day**: search by date and press
+history** at the bottom of **Manage Night Audit**: search by date and press
 **Print** in the **Audit pack** column. Automatic runs appear
 there with trigger **Scheduled**. If a pack is missing, press
 **Rebuild pack**  -  that recreates the printable reports without posting
@@ -233,6 +243,7 @@ that is actually due.
 | Open tills block the audit | Settings → Front Desk → Night audit checklist | On | Off lists open cashier sessions as a warning. |
 | Open restaurant bills block the audit | Settings → Front Desk → Night audit checklist | On | Off lists them as a warning. |
 | Departures still in house block the audit | Settings → Front Desk → Night audit checklist | On | Off lists them as a warning. |
+| Extend unchecked-out departures one night | Settings → Front Desk → Night audit checklist | Off | On: a guest still checked in past their departure date gets one more night when the audit runs, through the same path as **Extend stay**, and that night is posted. A stay that can't be extended (the room is booked) stays on the checklist. Step 3 lists these guests as a warning instead of a blocker. |
 | Flag in-house folios owing more than | Settings → Front Desk → Night audit checklist | 50000 | 0 turns the high-balance check off. |
 | Rate variance tolerance | Settings → Front Desk → Night audit checklist | 1 | How far (in currency units) a posted room night may be from the booked rate before it is listed. |
 | Run the night audit automatically | Settings → Front Desk → Automatic night audit | On | Off: only staff close the day. |

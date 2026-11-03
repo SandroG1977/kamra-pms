@@ -34,11 +34,14 @@ Revenue Dashboard** (also under **Reports**). **This property** shows:
   open folios);
 - **Statistics (month to date)**: occupancy, revenue, ADR, RevPAR and
   rooms sold;
+- **This year against last year**: occupancy, rooms sold, room and total
+  revenue, ADR and RevPAR for **Today**, **Month to date**, **Year to
+  date** or **Next 90 days**, with the change in percent;
 - **Housekeeping**: clean, dirty, inspected and out-of-order rooms, open
   and overdue tasks;
 - **Finance**: collected today, outstanding and open folios.
 
-![The property dashboard: headline tiles, month-to-date statistics, and the Housekeeping and Finance panels](/img/reports/dashboard.png)
+![The Revenue Dashboard: headline tiles, month-to-date statistics, and this year against last year](/img/reports/dashboard.png)
 
 **All properties** (shown when you have more than one property, for
 Finance, Revenue Manager and Hotel Admin) rolls the same numbers up across
@@ -69,6 +72,8 @@ outstanding. The owner view is for Finance, Revenue Manager, Night
 Auditor and Hotel Admin; the front desk can't open it. Revenue Managers
 see everything except the audit packs.
 
+![The owner view on a phone: revenue with occupancy, ADR and RevPAR, guests, money collected and owed, the next 7 days and the last night audits](/img/reports/owner-view.png)
+
 Tip: add the page to your phone's home screen from the browser's share
 menu to open it like an app.
 
@@ -84,10 +89,11 @@ your role can open (see [Who sees which report](#who-sees-which-report)).
    filters, set the date range (up to 92 days), and press **Preview**.
 2. **Save** to keep the definition under **My reports**. Finance and
    Hotel Admin can **share** a report with the property and set a
-   **Daily** or **Weekly** email schedule (recipients + time).
+   **Daily** or **Weekly** email schedule (recipients + time), or
+   **After night audit**: sent as soon as the audit closes the day.
 3. **CSV**, **Print** and **Email** work for new or saved reports.
-   Scheduled sends attach yesterday (or the last 7 days for weekly) as
-   CSV.
+   Scheduled sends attach yesterday (or the last 7 days for weekly, or
+   the day just closed for after night audit) as CSV.
 
 ### Group and drill down
 

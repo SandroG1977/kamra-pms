@@ -39,7 +39,7 @@ from the reservation.
 guest, invoice or folio, filter by status, or set **Closed from** and
 **To** to see the bills closed in a date range.
 
-![The Billing screen: shortcuts to End of Day and My Till, and the list of folios with their balances](/img/billing/billing-list.png)
+![The Billing screen: the Night audit card with its recent runs and Open End of Day, the Cashier till card, and the list of folios with their balances](/img/billing/billing-list.png)
 
 A folio opens by itself at check-in. Until it is settled it is a
 **Provisional Bill** with no invoice number.
@@ -93,9 +93,48 @@ payment posts to the folio by itself.
 by, and sends a held security deposit back through the deposit's own
 refund (see [Front desk](/front-desk)). For any other refund, under the
 payments list, **Refund money (deposit return / over-collection)** opens a
-refund row: amount, mode and a reason, then **Refund**. You can't refund
-more than was collected on the folio, and a closed folio can't be
-refunded. Every refund is written to the activity log with your name.
+refund row: amount, mode and a reason, then **Refund**. The link shows
+only when the guest is in credit (the folio reads **Advance**), and the
+amount starts at what is due back: a guest who still owes settles first.
+You can't refund more than the guest is owed or more than was collected,
+and a closed folio can't be refunded. Every refund is written to the
+activity log with your name.
+
+## Give a discount
+
+A discount comes off the room nights already on the bill. Under **Post a
+charge**, the **Give a discount** row takes:
+
+- **Percent (%)**: that share of every room night on the bill; or
+- **Amount**: **For the whole stay** (one amount) or **Per night** (that
+  amount for each room night on the bill); or
+- a **Promo code**: a voucher from **Revenue → Vouchers**. Its own type,
+  value, dates, minimum nights and **Max uses** apply, and it counts as a
+  use. A code can go on a stay once.
+
+Pick a reason (or type one; a promo code needs none) and press **Give
+discount**. Before you press it, the row shows what it takes off and from
+how many nights. The discount posts as an allowance at the room's tax
+rate, so the tax comes down with it, the room nights stay on the bill, and
+it gets an allowance voucher number.
+
+Who may give one follows **Allowances need a manager's approval** (see
+[When an allowance needs a manager](#when-an-allowance-needs-a-manager)):
+above the line the desk asks and a manager approves with their PIN.
+
+At check-out, when the guest still owes and you agreed a discount, press
+**Give a discount before collecting** on the check-out sheet's payment
+step, then collect the rest.
+
+Nights post at night audit, so a discount given on the day of arrival
+has nothing to come off yet: give it after the audit or at check-out.
+
+::: tip Why a discount is not a payment mode
+A payment is money received; a discount lowers what the stay earned.
+Booked as a payment, a discount would overstate room revenue and tax, and
+the till would not match the cash in it. Every discount is an allowance
+line, so **Review voids and allowances** lists them all for the manager.
+:::
 
 ## Correct a charge
 
@@ -245,6 +284,8 @@ allowed credit.
 **Receivables** (Finance → Receivables) is the home of every company
 account: who owes what, how late, and how much credit is left.
 
+![Receivables: what companies owe in total and overdue, and each account with its company, contact, terms, credit limit, overdue amount and balance](/img/billing/receivables.png)
+
 - **Open an account** (Finance and Hotel Admin): press **New account**,
   pick the company, and set the **Account number**, **Credit limit**
   (0 = no limit), the **payment terms** (the property's, or days to pay
@@ -326,7 +367,7 @@ times the days in the period.
 ## Bill a group from its main room
 
 A group booked with a main room (see
-[Group bookings](/reservations#group-bookings-corporate-wedding)) has one
+[Group bookings](/reservations#hold-rooms-for-a-group)) has one
 **Group** folio, the group bill, kept on the main room. As each charge is
 posted, Kamra sends what the main room pays to the group bill:
 
@@ -338,13 +379,15 @@ posted, Kamra sends what the main room pays to the group bill:
 Anything else stays on the guest's own folio. Alcohol never goes to the
 group bill. A company group keeps its own billing rules, which come first.
 
-**A room that pays for itself:** tick **Pays own charges** on its row in
-the rooming list. Only new charges stay on that room's folio; move charges
+**A room that pays for itself:** on the group's **Bill** tab, tick **Pays
+own room** on its row under **Each guest's own bill**. Only new charges stay on that room's folio; move charges
 already posted with **Move charges** on the folio.
 
 **Settle the group bill:**
 
-1. Open the group. The header shows **Open group bill** with its balance.
+1. Open the group and its **Bill** tab: **Open group bill** shows the
+   balance. Once everyone has checked out, **What to do next** offers
+   **Settle group bill** too.
 2. Click **Settle group bill**. Pick the payment mode and amount, or, for a
    company with credit, tick **Send to the company's city ledger**.
 3. Click **Settle**. Once nothing is left on it, the bill closes and gets its

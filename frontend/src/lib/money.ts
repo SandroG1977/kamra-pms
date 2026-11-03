@@ -38,6 +38,8 @@ interface Locale {
    *  caller picked, and the words that make a charge F&B. */
   fnb_tax_rate?: number
   fnb_charge_words?: string[]
+  /** Off for a dry property: alcohol fields and labels are hidden. */
+  sells_alcohol?: boolean
 }
 
 export interface Integrations {
@@ -116,13 +118,32 @@ export function adoptUiLocale(ui?: { currency_symbol?: string; locale?: string; 
 }
 
 export const locale = () => cache
+/** False on a dry property (Settings → Property): hide every alcohol field. */
+export const sellsAlcohol = () => cache.sells_alcohol !== false
 /** The property's currency symbol, e.g. "₹" or "Rp". */
 export const cur = () => cache.currency_symbol
 /** The number-formatting locale, e.g. "en-IN" (lakhs) or "id-ID". */
 export const moneyLocale = () => cache.locale
-export const fmtMoney = (n: unknown) =>
-  cache.currency_symbol +
-  Number(n ?? 0).toLocaleString(cache.locale, { maximumFractionDigits: 2 })
+/** The currency's minor-unit digits (2 for INR/USD, 0 for JPY), 2 until
+ *  the pack resolves or for a code Intl does not know. */
+export function moneyDigits(currency = cache.currency) {
+  try {
+    if (currency)
+      return new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions()
+        .maximumFractionDigits ?? 2
+  } catch {
+    /* unknown currency code */
+  }
+  return 2
+}
+/** An amount with the currency's normal decimals, always the same count
+ *  (2,27,255.40, never 2,27,255.4), so a column of figures lines up. */
+export const fmtAmount = (n: unknown) => {
+  const d = moneyDigits()
+  return Number(n ?? 0).toLocaleString(cache.locale, { minimumFractionDigits: d, maximumFractionDigits: d })
+}
+/** fmtAmount with the currency symbol in front. */
+export const fmtMoney = (n: unknown) => cache.currency_symbol + fmtAmount(n)
 export const taxRates = () => cache.tax_rates
 export const taxLabel = () => cache.tax_label
 /** Heading for the till's instant-mode bucket, "" where the country has none. */
