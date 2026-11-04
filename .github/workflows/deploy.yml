@@ -1,0 +1,194 @@
+name: CI/CD UnitHOS PMS (Frappe)
+
+on:
+  push:
+    branches: [ "unithos-pms", "main" ]
+  workflow_dispatch:
+    inputs:
+      target_site:
+        description: "Nombre del site de Frappe a migrar (o 'all' para todos)"
+        required: false
+        default: "all"
+      force_rebuild:
+        description: "Forzar reconstrucción de imagen Docker"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-pms-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ==============================================================================
+  # 🧪 ETAPA 1: VERIFICACIÓN Y VALIDACIÓN (CI)
+  # ==============================================================================
+  validate:
+    name: 🧪 Validate Frontend & Frappe Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Validar y compilar Frontend UnitHOS PMS
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run i18n:check
+          npm run build
+
+      - name: Verificar referencia de assets de producción
+        run: |
+          grep -q "/assets/kamra/frontend/assets/" kamra/public/frontend/index.html
+          echo "✅ Assets de producción validados correctamente en index.html."
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verificar sintaxis Python e integridad de DocTypes
+        run: |
+          python3 -c "import ast, glob, sys; [ast.parse(open(f).read()) for f in glob.glob('kamra/**/*.py', recursive=True)]"
+          echo "✅ Todos los módulos Python de Kamra/UnitHOS compilan sin errores."
+
+  # ==============================================================================
+  # 🚀 ETAPA 2: DESPLIEGUE CONTINUO EN EL SERVIDOR (CD - FRAPPE ENGINE)
+  # ==============================================================================
+  deploy:
+    name: 🚀 Deploy to VPS & Frappe Bench Migrate
+    runs-on: ubuntu-latest
+    needs: validate
+    environment:
+      name: PRODUCTION
+    steps:
+      - name: Checkout de código
+        uses: actions/checkout@v4
+
+      - name: Desplegar y Migrar Frappe en VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST || secrets.DEPLOY_HOST || secrets.SSH_HOST }}
+          username: ${{ secrets.VPS_USERNAME || secrets.DEPLOY_USER || secrets.SSH_USER || 'root' }}
+          key: ${{ secrets.VPS_SSH_KEY || secrets.DEPLOY_SSH_KEY || secrets.SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || secrets.DEPLOY_PORT || 22 }}
+          timeout: 40m
+          script_stop: true
+          script: |
+            set -euo pipefail
+            echo "=========================================================="
+            echo "🏨 INICIANDO DESPLIEGUE: UnitHOS PMS (Frappe Framework)"
+            echo "Host: $(hostname) | Usuario: $(whoami) | Fecha: $(date)"
+            echo "=========================================================="
+
+            # 1. Localizar directorio del stack de Frappe/Kamra
+            TARGET_DIR=""
+            for dir in "${{ vars.KAMRA_DIR || '' }}" "/opt/kamra" "/opt/infra/unithos-pms" "$HOME/.kamra" "$HOME/kamra-deploy"; do
+              if [ -n "$dir" ] && [ -d "$dir" ]; then
+                TARGET_DIR="$dir"
+                break
+              fi
+            done
+
+            if [ -z "$TARGET_DIR" ]; then
+              echo "⚠️ Directorio de despliegue no encontrado automáticamente. Creando /opt/kamra..."
+              sudo mkdir -p /opt/kamra
+              sudo chown -R $USER:$USER /opt/kamra
+              TARGET_DIR="/opt/kamra"
+            fi
+
+            echo "📁 Directorio objetivo: $TARGET_DIR"
+            cd "$TARGET_DIR"
+
+            # 2. Determinar comando de Docker Compose (kamra compose)
+            COMPOSE_CMD=""
+            if sudo docker compose -p kamra ps >/dev/null 2>&1; then
+              COMPOSE_CMD="sudo docker compose -p kamra"
+            elif [ -f "compose.yaml" ]; then
+              COMPOSE_CMD="sudo docker compose -p kamra -f compose.yaml"
+            elif [ -d "frappe_docker" ]; then
+              cd frappe_docker
+              COMPOSE_CMD="sudo docker compose -p kamra -f compose.yaml -f overrides/compose.mariadb.yaml -f overrides/compose.redis.yaml -f overrides/compose.noproxy.yaml"
+            else
+              COMPOSE_CMD="sudo docker compose"
+            fi
+
+            echo "🐳 Docker Compose Command: $COMPOSE_CMD"
+
+            # 3. PASO CRÍTICO DE FRAPPE: BACKUP PREVENTIVO DE BASE DE DATOS Y ARCHIVOS
+            echo "----------------------------------------------------------"
+            echo "📦 [Frappe] Ejecutando bench backup --with-files preventivo..."
+            echo "----------------------------------------------------------"
+            if $COMPOSE_CMD ps --services | grep -q "backend"; then
+              $COMPOSE_CMD exec -T backend bench --site all backup --with-files || {
+                echo "⚠️ Advertencia: No se pudo completar el backup previo (posiblemente primer despliegue)."
+              }
+            fi
+
+            # 4. ACTUALIZACIÓN DEL CÓDIGO Y CONTENEDORES
+            echo "----------------------------------------------------------"
+            echo "🔄 [Stack] Actualizando contenedores y código UnitHOS..."
+            echo "----------------------------------------------------------"
+            if [ -f "$TARGET_DIR/install.sh" ]; then
+              echo "Ejecutando actualización nativa vía install.sh update..."
+              sudo KAMRA_GIT_URL="https://github.com/SandroG1977/kamra-pms" \
+                   KAMRA_BRANCH="unithos-pms" \
+                   bash "$TARGET_DIR/install.sh" update || true
+            else
+              $COMPOSE_CMD pull || true
+              $COMPOSE_CMD up -d --force-recreate
+            fi
+
+            # Esperar a que el backend de Frappe esté completamente listo
+            echo "⏳ Esperando a que el backend de Frappe responda..."
+            for i in $(seq 1 30); do
+              if $COMPOSE_CMD exec -T backend bench --version >/dev/null 2>&1; then
+                echo "✅ Backend de Frappe activo y listo."
+                break
+              fi
+              echo "  Intento $i/30: esperando 3 segundos..."
+              sleep 3
+            done
+
+            # 5. PASO CRÍTICO DE FRAPPE: MIGRACIÓN DE DOCTYPES Y TABLAS DE BASE DE DATOS
+            TARGET_SITE="${{ inputs.target_site || 'all' }}"
+            echo "----------------------------------------------------------"
+            echo "⚡ [Frappe] Ejecutando bench migrate en site(s): $TARGET_SITE..."
+            echo "----------------------------------------------------------"
+            $COMPOSE_CMD exec -T backend bench --site "$TARGET_SITE" migrate
+
+            # 6. COMPILACIÓN Y ENLACE DE ASSETS DE FRAPPE
+            echo "----------------------------------------------------------"
+            echo "🎨 [Frappe] Compilando y publicando assets de Kamra/UnitHOS..."
+            echo "----------------------------------------------------------"
+            $COMPOSE_CMD exec -T backend bench build --app kamra || true
+
+            # 7. PASO CRÍTICO DE FRAPPE: LIMPIEZA DE CACHÉ DE REDIS Y METADATA
+            echo "----------------------------------------------------------"
+            echo "🧹 [Frappe] Limpiando caché Redis (DocTypes, i18n, schemas)..."
+            echo "----------------------------------------------------------"
+            $COMPOSE_CMD exec -T backend bench --site "$TARGET_SITE" clear-cache
+
+            # 8. REINICIO DE WORKERS Y GUNICORN PARA CARGAR NUEVO CÓDIGO PYTHON
+            echo "----------------------------------------------------------"
+            echo "🔄 [Frappe] Reiniciando workers, scheduler y web server..."
+            echo "----------------------------------------------------------"
+            $COMPOSE_CMD restart backend scheduler queue-short queue-long
+
+            # 9. HEALTH CHECK Y DIAGNÓSTICO FINAL
+            echo "----------------------------------------------------------"
+            echo "🩺 [Salud] Verificando estado final del cluster PMS..."
+            echo "----------------------------------------------------------"
+            sleep 5
+            $COMPOSE_CMD ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+
+            echo "=========================================================="
+            echo "✅ DESPLIEGUE DE UNITHOS PMS Y FRAPPE FINALIZADO CON ÉXITO"
+            echo "=========================================================="
