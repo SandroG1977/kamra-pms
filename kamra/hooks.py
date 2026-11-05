@@ -114,16 +114,43 @@ kamra_localization = {
 # injected; every deep link falls through to it so browser refresh works.
 website_route_rules = [
 	{"from_route": "/kamra/<path:app_path>", "to_route": "kamra"},
+	{"from_route": "/kamra", "to_route": "kamra"},
+	{"from_route": "/login", "to_route": "kamra"},
+	{"from_route": "/setup", "to_route": "kamra"},
+	{"from_route": "/finish-setup", "to_route": "kamra"},
+	{"from_route": "/calendar", "to_route": "kamra"},
+	{"from_route": "/tape", "to_route": "kamra"},
+	{"from_route": "/reservations", "to_route": "kamra"},
+	{"from_route": "/rooms", "to_route": "kamra"},
+	{"from_route": "/room-types", "to_route": "kamra"},
+	{"from_route": "/room-blocks", "to_route": "kamra"},
+	{"from_route": "/rate-plans", "to_route": "kamra"},
+	{"from_route": "/rate-calendar", "to_route": "kamra"},
+	{"from_route": "/guests", "to_route": "kamra"},
+	{"from_route": "/guests/<path:app_path>", "to_route": "kamra"},
+	{"from_route": "/book", "to_route": "kamra"},
+	{"from_route": "/book/<path:app_path>", "to_route": "kamra"},
+	{"from_route": "/stay/<path:app_path>", "to_route": "kamra"},
+	{"from_route": "/checkin/<path:app_path>", "to_route": "kamra"},
+	{"from_route": "/hk", "to_route": "kamra"},
+	{"from_route": "/apps", "to_route": "kamra"},
+	{"from_route": "/marketplace", "to_route": "kamra"},
+	{"from_route": "/agents", "to_route": "kamra"},
+	{"from_route": "/activity", "to_route": "kamra"},
+	{"from_route": "/assistant", "to_route": "kamra"},
+	{"from_route": "/billing", "to_route": "kamra"},
+	{"from_route": "/reports", "to_route": "kamra"},
+	{"from_route": "/reports-hub", "to_route": "kamra"},
+	{"from_route": "/settings", "to_route": "kamra"},
+	{"from_route": "/settings/<path:app_path>", "to_route": "kamra"},
+	{"from_route": "/developers", "to_route": "kamra"},
+	{"from_route": "/system-health", "to_route": "kamra"},
 ]
 
-# Clean, shareable guest URLs redirect into the SPA's routes.
+# Redirect legacy /kamra URLs cleanly to root paths
 website_redirects = [
-	{"source": r"/book$", "target": "/kamra/book"},
-	{"source": r"/book/(.*)", "target": r"/kamra/book/\1"},
-	{"source": r"/stay$", "target": "/kamra/stay"},
-	{"source": r"/stay/(.*)", "target": r"/kamra/stay/\1"},
-	{"source": r"/hk$", "target": "/kamra/hk"},
-	{"source": r"/checkin/(.*)", "target": r"/kamra/checkin/\1"},
+	{"source": r"/kamra$", "target": "/"},
+	{"source": r"/kamra/(.*)", "target": r"/\1"},
 ]
 
 # Each item in the list will be shown as an app in the apps page
