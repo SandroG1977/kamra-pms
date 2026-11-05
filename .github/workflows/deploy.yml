@@ -157,6 +157,11 @@ jobs:
               sleep 3
             done
 
+            # Conectar a hos_network para Nginx Proxy Manager y Agentes UnitHOS
+            echo "🔗 Garantizando conexión a hos_network..."
+            sudo docker network connect hos_network kamra-frontend-1 2>/dev/null || true
+            sudo docker network connect hos_network kamra-backend-1 2>/dev/null || true
+
             # 5. PASO CRÍTICO DE FRAPPE: MIGRACIÓN DE DOCTYPES Y TABLAS DE BASE DE DATOS
             TARGET_SITE="${{ inputs.target_site || 'all' }}"
             echo "----------------------------------------------------------"
