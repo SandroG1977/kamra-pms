@@ -45,7 +45,7 @@ def registry(property: str):
 
 	return [
 		{
-			"category": "Kamra apps",
+			"category": "UnitHOS apps",
 			"blurb": "The rooms of your PMS - every app is open and included.",
 			"cards": [
 				_module("Front Desk", "Reservations, arrivals, the desk."),
@@ -53,7 +53,7 @@ def registry(property: str):
 				_module("Operations", "Guest requests and shifts."),
 				_module("Finance", "Folios, invoices, night audit."),
 				_module("Copilot",
-				        "In-app Kamra Agent with your own AI key "
+				        "In-app UnitHOS Copilot with your own AI key "
 				        "(OpenAI, Gemini, Groq, OpenRouter…)."),
 				_module("Events & Groups", "Banquets, blocks and pickup."),
 				_module("Revenue", "Rates, seasons, offers, partners."),
@@ -71,7 +71,7 @@ def registry(property: str):
 				        "Booking confirmations, self check-in links, payment "
 				        "requests and a desk-side guest thread on your own "
 				        "WhatsApp Business number. Meta bills you directly "
-				        "per conversation; Kamra adds nothing.",
+				        "per conversation; UnitHOS adds nothing.",
 				        detail="Included - bring your own number"),
 				_bench("WhatsApp managed gateway",
 				       "Same features, our number and Meta relationship - "
@@ -82,9 +82,9 @@ def registry(property: str):
 		},
 		{
 			"category": "AI on your phone lines (HeyKoala)",
-			"blurb": "Kamra is agent-ready. HeyKoala is the AI that answers your "
+			"blurb": "UnitHOS is agent-ready. HeyKoala is the AI that answers your "
 			         "phone and WhatsApp - it books, quotes and handles requests "
-			         "24x7 using Kamra's governed tools, and every action is "
+			         "24x7 using UnitHOS governed tools, and every action is "
 			         "logged. Connect a number to switch it on.",
 			"cards": [
 				_connector("HeyKoala Voice AI", "heykoala",
@@ -122,9 +122,9 @@ def registry(property: str):
 		},
 		{
 			"category": "Bring your own AI",
-			"blurb": "Kamra ships the governed tools + MCP; you bring the "
+			"blurb": "UnitHOS ships the governed tools + MCP; you bring the "
 			         "intelligence. Connect Claude Desktop over MCP, or power "
-			         "the in-app Agent with any OpenAI-compatible key "
+			         "the in-app Copilot with any OpenAI-compatible key "
 			         "(OpenAI, Gemini, Groq, OpenRouter, Ollama…).",
 			"cards": [
 				_connector("Connect Claude (MCP)", "claude",
@@ -135,7 +135,7 @@ def registry(property: str):
 				           status="connected" if has_key else "available",
 				           detail="Your connector" if has_key else None),
 				_connector("Bring your own model", "openai",
-				           "In-app Kamra Agent: pick OpenAI, Gemini, Groq, "
+				           "In-app UnitHOS Copilot: pick OpenAI, Gemini, Groq, "
 				           "OpenRouter or Ollama, paste a key, Test connection.",
 				           action="route", route="/settings",
 				           status="connected" if ai else "configure"),
@@ -161,7 +161,7 @@ def registry(property: str):
 		},
 		{
 			"category": "Accounting",
-			"blurb": "Push closed folios to your books - Kamra keeps the "
+			"blurb": "Push closed folios to your books - UnitHOS keeps the "
 			         "front office, your ledger keeps compliance.",
 			"cards": [
 				_connector("Accounting export", "export",

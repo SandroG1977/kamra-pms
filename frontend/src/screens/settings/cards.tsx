@@ -605,7 +605,7 @@ function AiAssistantCard({
           <CardTitle>{t("AI assistant (bring your own key)")}</CardTitle>
           <p className="mt-0.5 text-xs text-zinc-400">
             {t(
-              "Kamra Agent for staff. Pick a provider, paste the key, Test. Claude Desktop is MCP (Kamra Agent → Connect your AI) - not an Anthropic key in this form.",
+              "UnitHOS Copilot for staff. Pick a provider, paste the key, Test. Claude Desktop is MCP (UnitHOS Copilot → Connect your AI) - not an Anthropic key in this form.",
             )}
           </p>
         </div>
@@ -716,7 +716,7 @@ function AiAssistantCard({
             {t("Never send guest contact details to the AI provider")}
             <span className="mt-0.5 block text-xs font-normal text-zinc-400">
               {t(
-                "When off, phone and ID numbers in tool results are shortened to the last four digits before they leave Kamra.",
+                "When off, phone and ID numbers in tool results are shortened to the last four digits before they leave UnitHOS.",
               )}
             </span>
           </span>
@@ -748,8 +748,8 @@ function AiAssistantCard({
         )}
         <p className="text-xs text-zinc-400">
           {t("Want Claude the app?")}{" "}
-          <a href="/kamra/assistant" className="font-medium text-brand-700 hover:underline">
-            {t("Kamra Agent → Connect your AI")}
+          <a href="/assistant" className="font-medium text-brand-700 hover:underline">
+            {t("UnitHOS Copilot → Connect your AI")}
           </a>
           . {t("Want Claude the model in this chat? Use the OpenRouter preset.")}
         </p>
@@ -846,9 +846,9 @@ export function AgentAccessCard() {
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <p className="text-zinc-600">
-          <Link to="/assistant" className="font-medium text-brand-700 hover:underline">{translateUI("Kamra Agent → AI Provider")}</Link>{": "}{translateUI("Use the MCP URL to connect ChatGPT, Claude or another compatible provider. Each person signs in as themselves with OAuth.")}</p>
+          <Link to="/assistant" className="font-medium text-brand-700 hover:underline">{translateUI("UnitHOS Copilot → AI Provider")}</Link>{": "}{translateUI("Use the MCP URL to connect ChatGPT, Claude or another compatible provider. Each person signs in as themselves with OAuth.")}</p>
         <pre className="overflow-x-auto rounded-lg bg-zinc-100 p-3 text-xs leading-relaxed text-zinc-700">
-          {`claude mcp add --transport http kamra ${window.location.origin}/mcp`}
+          {`claude mcp add --transport http unithos ${window.location.origin}/mcp`}
         </pre>
         <p className="text-xs text-zinc-400">{translateUI("Service keys for unattended agents are issued by IT under Developers.")}</p>
       </CardContent>
@@ -1119,7 +1119,7 @@ export function HurdleRatesCard({ property }: { property: string }) {
       <CardHeader>
         <div>
           <CardTitle>{translateUI("Demand pricing (hurdle rates)")}</CardTitle>
-          <p className="mt-0.5 text-xs text-zinc-400">{translateUI("When forecast occupancy for a date crosses a threshold, quotes carry the premium automatically and no rate may sell below the hurdle. A room-type tier beats the all-types tier. Guardrails (floor and ceiling) only bound rates set through set_room_rate - Kamra Agent, MCP or the API - not these premiums, staff seasons or quotes.")}</p>
+          <p className="mt-0.5 text-xs text-zinc-400">{translateUI("When forecast occupancy for a date crosses a threshold, quotes carry the premium automatically and no rate may sell below the hurdle. A room-type tier beats the all-types tier. Guardrails (floor and ceiling) only bound rates set through set_room_rate - UnitHOS Copilot, MCP or the API - not these premiums, staff seasons or quotes.")}</p>
         </div>
         <Button variant="outline" className="shrink-0" onClick={() => setForm({ from: "", premium: "", min: "", room_type: "" })}>{translateUI("Add tier")}</Button>
       </CardHeader>
