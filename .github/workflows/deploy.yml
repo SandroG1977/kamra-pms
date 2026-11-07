@@ -79,7 +79,8 @@ jobs:
           username: ${{ secrets.VPS_USERNAME || secrets.DEPLOY_USER || secrets.SSH_USER || vars.VPS_USERNAME || vars.DEPLOY_USER || vars.SSH_USER || 'root' }}
           key: ${{ secrets.VPS_SSH_KEY || secrets.DEPLOY_SSH_KEY || secrets.SSH_KEY || vars.VPS_SSH_KEY || vars.DEPLOY_SSH_KEY || vars.SSH_KEY }}
           port: ${{ secrets.VPS_PORT || secrets.DEPLOY_PORT || vars.VPS_PORT || vars.DEPLOY_PORT || 22 }}
-          timeout: 40m
+          timeout: 60s
+          command_timeout: 45m
           script_stop: true
           script: |
             set -euo pipefail
@@ -124,9 +125,12 @@ jobs:
 
             # 3. PASO CRÍTICO DE FRAPPE: BACKUP PREVENTIVO DE BASE DE DATOS Y ARCHIVOS
             echo "----------------------------------------------------------"
-            echo "📦 [Frappe] Ejecutando bench backup --with-files preventivo..."
+            echo "📦 [Frappe] Comprobando backup preventivo..."
             echo "----------------------------------------------------------"
-            if $COMPOSE_CMD ps --services | grep -q "backend"; then
+            if [ -f "$TARGET_DIR/install.sh" ]; then
+              echo "ℹ️ install.sh update ejecutará el backup atómico preventivo antes de actualizar."
+            elif $COMPOSE_CMD ps --services 2>/dev/null | grep -q "backend"; then
+              echo "Ejecutando bench backup --with-files..."
               $COMPOSE_CMD exec -T backend bench --site all backup --with-files || {
                 echo "⚠️ Advertencia: No se pudo completar el backup previo (posiblemente primer despliegue)."
               }
@@ -140,7 +144,7 @@ jobs:
               echo "Ejecutando actualización nativa vía install.sh update..."
               sudo KAMRA_GIT_URL="https://github.com/SandroG1977/kamra-pms" \
                    KAMRA_BRANCH="unithos-pms" \
-                   bash "$TARGET_DIR/install.sh" update || true
+                   bash "$TARGET_DIR/install.sh" update
             else
               $COMPOSE_CMD pull || true
               $COMPOSE_CMD up -d --force-recreate
