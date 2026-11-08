@@ -104,7 +104,6 @@ kamra_localization = {
 	"United Arab Emirates": "kamra.localization.uae",
 	"Saudi Arabia": "kamra.localization.saudi",
 	"Brazil": "kamra.localization.brazil",
-	"Brasil": "kamra.localization.brazil",
 	"Nicaragua": "kamra.localization.nicaragua",
 }
 
