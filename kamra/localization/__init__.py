@@ -32,6 +32,11 @@ from datetime import date
 import frappe
 
 
+COUNTRY_ALIASES = {
+	"Brasil": "Brazil",
+}
+
+
 def pack_for(property: str | None = None):
 	country = None
 	if property:
@@ -40,6 +45,7 @@ def pack_for(property: str | None = None):
 
 
 def pack_for_country(country: str):
+	country = COUNTRY_ALIASES.get(country, country)
 	mapping = frappe.get_hooks("kamra_localization") or {}
 	target = mapping.get(country)
 	if target:
@@ -425,12 +431,16 @@ def supported_countries() -> list[dict]:
 	generic pack with the currency the operator chooses."""
 	mapping = frappe.get_hooks("kamra_localization") or {}
 	out = []
+	seen = set()
 	for country, target in mapping.items():
 		path = target[-1] if isinstance(target, (list, tuple)) else target
+		if path in seen:
+			continue
 		try:
 			pack = importlib.import_module(path)
 		except ModuleNotFoundError:
 			continue
+		seen.add(path)
 		ctx = pack.invoice_context(frappe._dict(name=None))
 		out.append({
 			"country": country,

@@ -78,8 +78,11 @@ class TestNicaraguaPack(unittest.TestCase):
 			self.assertIs(localization.pack_for_country("Nicaragua"), nicaragua)
 			self.assertEqual(localization.pack_for_country("India").__name__, "kamra.localization.india")
 			self.assertEqual(localization.pack_for_country("Brazil").__name__, "kamra.localization.brazil")
+			self.assertEqual(localization.pack_for_country("Brasil").__name__, "kamra.localization.brazil")
 			self.assertEqual(localization.pack_for_country("Unknown").__name__, "kamra.localization.generic")
 			countries = {row["country"]: row for row in localization.supported_countries()}
+			self.assertIn("Brazil", countries)
+			self.assertNotIn("Brasil", countries)
 			self.assertEqual(countries["Nicaragua"]["currency"], "NIO")
 			self.assertEqual(countries["Nicaragua"]["tax_id_label"], "RUC")
 
