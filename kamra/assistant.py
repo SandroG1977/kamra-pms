@@ -92,6 +92,27 @@ Core Rules:
 
 SYSTEM_RESERVAS = """
 Reservations & Quoting Rules:
+- Room Capacity & Occupancy Rules:
+  * Room capacity is strictly capped by `max_total_occupants` (or `adults_capacity` if total is not set), which represents the TOTAL number of guests (adults + children) that can stay in the room.
+  * For example, a room with `max_total_occupants: 4` (or `adults_capacity: 4, children_capacity: 4`) sleeps a MAXIMUM OF 4 PEOPLE TOTAL in regular beds (e.g. 4 adults, 2 adults + 2 children, 3 adults + 1 child, etc.). It does NOT sleep 8 people!
+  * With extra bed / arrangement (`max_extra_beds: 1`), it can accommodate at most 1 additional person (e.g. 5 people total).
+  * If a party exceeds the room's total capacity (e.g. 5 people without extra beds, or 6+ people), you MUST quote multiple rooms (e.g. 2 rooms for 5-8 people).
+- Holiday Packages & Special Festive Dates (Revellión / Año Nuevo, Easter / Páscoa, Carnival, Feriados):
+  * Whenever asked about holidays, festive periods (such as Revellión / New Year, Carnival, Easter / Páscoa), special packages, or minimum stay requirements, ALWAYS check `holiday_packages` (or `booking_options`) first!
+  * A Holiday Package (e.g. Revellión) is a CLOSED PACKAGE with a fixed price for N nights and ALWAYS HAS STRICT PRIORITY over standard daily rates or regular seasons.
+  * When a holiday package applies (e.g. Revellión from Dec 27 to Jan 03):
+    1. Clearly explain that it is sold as a closed package of N nights (minimum 3 nights).
+    2. Quote the total fixed package price based on occupancy (e.g. R$1850 for 2 guests, R$2500 for 3 guests, R$3000 for 4 guests for the entire 3-night package).
+    3. State that the minimum stay required is 3 nights.
+    4. Mention package inclusions (e.g. café da manhã / breakfast included) and payment terms (e.g. 50% advance, non-refundable).
+- Date & Season Resolution:
+  * When asked about rates, prices, or seasons for a month or period (e.g. "enero" / "January" / "temporada alta"):
+    1. ALWAYS call `seasons` and `holiday_packages` to check active season rules and holiday packages!
+    2. When asked about upcoming months (such as "enero" / "January"), always resolve to the upcoming occurrence (e.g. January 2027, never the past January 2026).
+    3. Respect weekday vs weekend season pricing: when a season has differentiated pricing for weekdays vs weekends (e.g. dom, seg, ter, qua vs qui, sex, sab), NEVER quote only the flat base rate; ALWAYS clearly present both rates. For example, for January 2027 in Pousada Costa do Mar (base R$200):
+       - Weekdays (Sunday to Wednesday / dom-qua, +25%): R$250/night
+       - Weekends (Thursday to Saturday / qui-sab, +50%): R$300/night
+    4. If holiday packages overlap (e.g. Revellión until Jan 3), explain the package first and then the seasonal daily rates for the rest of the month.
 - Always call `quote` with the requested dates and exact adult/child occupancy before quoting or booking. Never quote prices using base_price from `booking_options` or `availability` (which only reflect base occupancy for 2 persons without extra guests or taxes).
 - Always quote the total payable price (`amount_after_tax` or `totals.total`), presenting it directly as the final price (e.g. "{currency_label}280, taxes included"). Do not unbundle pre-tax base rates unless specifically requested.
 - Children & Infant Policy:
@@ -124,6 +145,14 @@ SYSTEM = SYSTEM_BASE + "\n" + SYSTEM_RESERVAS + "\n" + SYSTEM_FRONTDESK + "\n" +
 # tool name → (kamra.api function, description, JSON-schema params,
 # inject property?, mutating? - mutating calls are audit-logged)
 EXTRA_TOOLS = {
+	"seasons": (
+		"get_seasons",
+		"List all active seasons, date ranges, days of the week, and rate adjustments (+% or absolute) for the property.",
+		{}, True, False),
+	"holiday_packages": (
+		"get_holiday_packages",
+		"List all active holiday packages, date ranges, package prices by party size, inclusions and stay rules for the property.",
+		{}, True, False),
 	"amend_stay_preview": (
 		"amend_stay_preview",
 		"What new dates would do to a stay's bill (current vs new total, new "
@@ -919,7 +948,7 @@ def _resolve(fn_name: str):
 
 TOOL_CHANNELS = {
 	"reservas": {
-		"availability", "quote", "booking_options", "create_booking",
+		"availability", "quote", "booking_options", "seasons", "holiday_packages", "create_booking",
 		"find_reservations", "stay_detail", "cancellation_preview", "cancel_booking"
 	},
 	"housekeeping": {

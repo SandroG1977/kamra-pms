@@ -14,6 +14,33 @@ from frappe.utils import add_days, cint, flt, get_datetime, getdate, now_datetim
 from kamra.authz import act_as, assert_property_access, require_it_admin, require_roles
 from kamra.install import AGENT_EMAIL
 
+
+@frappe.whitelist()
+def get_seasons(property: str):
+	"""List all active seasons and rate adjustments for the property."""
+	return frappe.get_all(
+		"Season",
+		filters={"property": property, "disabled": 0},
+		fields=["name", "season_name", "room_type", "start_date", "end_date",
+		        "adjustment_type", "adjustment_value", "priority", "minimum_nights",
+		        "days_of_week", "non_refundable", "advance_percent"],
+		order_by="start_date asc",
+	)
+
+
+@frappe.whitelist()
+def get_holiday_packages(property: str):
+	"""List all active holiday packages for the property."""
+	return frappe.get_all(
+		"Holiday Package",
+		filters={"property": property, "disabled": 0},
+		fields=["name", "package_name", "room_type", "start_date", "end_date",
+		        "package_nights", "minimum_nights", "price_1_pax", "price_2_pax",
+		        "price_3_pax", "price_4_pax", "price_5_pax", "extra_adult_price",
+		        "child_price", "advance_percent", "non_refundable", "inclusions", "priority"],
+		order_by="start_date asc",
+	)
+
 # The apps a property actually runs. The launcher and the sidebar read
 # this so a serviced-apartment operator never sees an empty restaurant.
 ALL_MODULES = ("front-desk", "housekeeping", "operations", "fnb", "events",
@@ -6004,14 +6031,19 @@ def set_late_arrival(reservation: str, late_arrival: int = 1,
 def booking_options(property: str):
 	"""Everything the booking form needs to render its dropdowns."""
 	from kamra.channel_manager import channel_commission_pcts
+	room_types = frappe.get_all(
+		"Room Type", filters={"property": property, "disabled": 0},
+		fields=["name", "room_type_code", "room_type_name", "base_price",
+		        "adults_capacity", "children_capacity", "max_total_occupants",
+		        "room_category", "max_extra_beds"],
+		order_by="base_price asc",
+	)
+	for rt in room_types:
+		if not rt.get("max_total_occupants") or cint(rt.get("max_total_occupants")) <= 0:
+			rt["max_total_occupants"] = rt.get("adults_capacity") or 2
+
 	return {
-		"room_types": frappe.get_all(
-			"Room Type", filters={"property": property, "disabled": 0},
-			fields=["name", "room_type_code", "room_type_name", "base_price",
-			        "adults_capacity", "children_capacity", "room_category",
-			        "max_extra_beds"],
-			order_by="base_price asc",
-		),
+		"room_types": room_types,
 		"meal_plans": frappe.get_all(
 			"Meal Plan", filters={"property": property, "disabled": 0},
 			fields=["name", "code", "label", "price_per_adult", "is_default"],

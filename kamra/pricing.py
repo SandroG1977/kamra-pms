@@ -191,6 +191,8 @@ def capacity_overflow(cap, adults: int, children: int,
 	overflow = ((max(0, int(adults or 0) - cap_a) if cap_a else 0)
 	            + (max(0, int(children or 0) - cap_c) if cap_c else 0))
 	max_total = int(cap.get("max_total_occupants") or 0)
+	if not max_total and cap_a:
+		max_total = cap_a
 	if max_total:
 		total = int(adults or 0) + int(children or 0)
 		overflow = max(overflow, max(0, total - max_total))
@@ -254,6 +256,18 @@ def demand_adjust(property: str, room_type: str, date, rate: Decimal,
 	return rate, tier
 
 
+_DAY_ALIAS_MAP = {
+	"dom": "sun", "domingo": "sun",
+	"seg": "mon", "segunda": "mon",
+	"ter": "tue", "terca": "tue", "terça": "tue",
+	"qua": "wed", "quarta": "wed",
+	"qui": "thu", "quinta": "thu",
+	"sex": "fri", "sexta": "fri",
+	"sab": "sat", "sabado": "sat", "sábado": "sat",
+	"lun": "mon", "mar": "tue", "mie": "wed", "mié": "wed", "jue": "thu", "vie": "fri",
+}
+
+
 def days_cover(days_of_week: str | None, day_abbr: str) -> bool:
 	"""Does a comma-separated day list cover this weekday?
 
@@ -261,7 +275,8 @@ def days_cover(days_of_week: str | None, day_abbr: str) -> bool:
 	the weekend/weekday shorthands expanded. Shared by seasons, rate
 	guardrails and small-group pricing so all three read a day list the same
 	way - note that "weekend" means Sat+Sun, so a property whose weekend is
-	Fri+Sat spells the days out.
+	Fri+Sat spells the days out. Also supports Portuguese and Spanish weekday
+	names and abbreviations.
 	"""
 	if not days_of_week:
 		return True
@@ -272,7 +287,9 @@ def days_cover(days_of_week: str | None, day_abbr: str) -> bool:
 		elif d in ("weekday", "weekdays"):
 			normalized_days.update(["mon", "tue", "wed", "thu", "fri"])
 		else:
-			normalized_days.add(d[:3])
+			prefix = d[:3]
+			mapped = _DAY_ALIAS_MAP.get(d) or _DAY_ALIAS_MAP.get(prefix) or prefix
+			normalized_days.add(mapped)
 	return day_abbr in normalized_days
 
 

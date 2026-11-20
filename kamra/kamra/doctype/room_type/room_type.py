@@ -3,11 +3,16 @@
 
 import frappe
 from frappe.model.document import Document
+from frappe.utils import cint
 
 
 class RoomType(Document):
 	def validate(self):
 		from kamra.booking_slugs import slugify, unique_listing_slug
+
+		# Default max_total_occupants to adults_capacity or base_occupancy if unconstrained (<= 0)
+		if not self.max_total_occupants or cint(self.max_total_occupants) <= 0:
+			self.max_total_occupants = cint(self.adults_capacity) or cint(self.base_occupancy) or 2
 
 		if not (self.listing_slug or "").strip():
 			self.listing_slug = unique_listing_slug(
