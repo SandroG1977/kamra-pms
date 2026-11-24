@@ -138,16 +138,27 @@ jobs:
 
             # 4. ACTUALIZACIÓN DEL CÓDIGO Y CONTENEDORES
             echo "----------------------------------------------------------"
-            echo "🔄 [Stack] Actualizando contenedores y código UnitHOS..."
+            echo "🔄 [Stack] Actualizando código UnitHOS y Frontend..."
             echo "----------------------------------------------------------"
-            if [ -f "$TARGET_DIR/install.sh" ]; then
-              echo "Ejecutando actualización nativa vía install.sh update..."
+            FORCE_REBUILD="${{ inputs.force_rebuild || 'false' }}"
+            if [ "$FORCE_REBUILD" = "true" ] && [ -f "$TARGET_DIR/install.sh" ]; then
+              echo "⚠️ Modo reconstrucción forzada: ejecutando install.sh update..."
               sudo KAMRA_GIT_URL="https://github.com/SandroG1977/kamra-pms" \
                    KAMRA_BRANCH="unithos-pms" \
                    bash "$TARGET_DIR/install.sh" update
             else
-              $COMPOSE_CMD pull || true
-              $COMPOSE_CMD up -d --force-recreate
+              echo "⚡ Despliegue en caliente ultrarrápido (Git + Frontend + Migraciones)..."
+              # 1. Actualizar repositorio kamra dentro del contenedor backend
+              $COMPOSE_CMD exec -T backend bash -c "cd /home/frappe/frappe-bench/apps/kamra && git fetch origin && git checkout unithos-pms && git pull origin unithos-pms"
+              
+              # 2. Compilar frontend de Kamra (Vite)
+              $COMPOSE_CMD exec -T -u frappe backend bash -c "cd /home/frappe/frappe-bench/apps/kamra/frontend && npm run build"
+              
+              # 3. Sincronizar assets al contenedor frontend (Nginx) y recargar Nginx
+              sudo docker cp kamra-backend-1:/home/frappe/frappe-bench/apps/kamra/kamra/public/frontend /tmp/kamra_frontend
+              sudo docker cp /tmp/kamra_frontend/. kamra-frontend-1:/home/frappe/frappe-bench/apps/kamra/kamra/public/frontend/
+              sudo rm -rf /tmp/kamra_frontend
+              sudo docker exec kamra-frontend-1 nginx -s reload || true
             fi
 
             # Esperar a que el backend de Frappe esté completamente listo
