@@ -146,12 +146,16 @@ export function adoptGuestLanguage(preferred?: string | null) {
   syncLang()
 }
 
+let lastAppliedLang: string | null = null
+
 /** Re-apply after moving between a guest page and the desk in one tab. */
 export function syncLang() {
-  const code = getLang()
-  applyLang(code)
+  const current = getLang()
+  if (current === lastAppliedLang) return
+  lastAppliedLang = current
+  applyLang(current)
   void import("./locales").then(({ ensureDictionary }) =>
-    ensureDictionary(code).then(() => {
+    ensureDictionary(current).then(() => {
       window.dispatchEvent(new Event("kamra:lang"))
     }),
   )

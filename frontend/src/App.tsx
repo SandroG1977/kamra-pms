@@ -190,14 +190,12 @@ export default function App() {
         {/* public booking engine - no login; stay state lives in the URL
             (/book/2026-07-10/2026-07-12/2/0) so links are shareable and
             crawlable */}
-        <Route path="book" element={<PublicBooking />} />
         <Route
-          path="book/:checkin/:checkout?/:adults?/:children?"
+          path="book/:checkin?/:checkout?/:adults?/:children?"
           element={<PublicBooking />}
         />
-        <Route path="stay/:slug" element={<PublicListing />} />
         <Route
-          path="stay/:slug/:checkin/:checkout?/:adults?/:children?"
+          path="stay/:slug/:checkin?/:checkout?/:adults?/:children?"
           element={<PublicListing />}
         />
         {/* pre-arrival self check-in, tokenized per reservation */}
