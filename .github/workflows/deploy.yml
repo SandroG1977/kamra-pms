@@ -149,7 +149,7 @@ jobs:
             else
               echo "⚡ Despliegue en caliente ultrarrápido (Git + Frontend + Migraciones)..."
               # 1. Actualizar repositorio kamra dentro del contenedor backend
-              $COMPOSE_CMD exec -T backend bash -c "cd /home/frappe/frappe-bench/apps/kamra && git fetch origin && git checkout unithos-pms && git pull origin unithos-pms"
+              $COMPOSE_CMD exec -T backend bash -c "git config --global --add safe.directory /home/frappe/frappe-bench/apps/kamra 2>/dev/null || true; cd /home/frappe/frappe-bench/apps/kamra && git fetch origin unithos-pms && git checkout -f unithos-pms && git reset --hard origin/unithos-pms"
               
               # 2. Compilar frontend de Kamra (Vite)
               $COMPOSE_CMD exec -T -u frappe backend bash -c "cd /home/frappe/frappe-bench/apps/kamra/frontend && npm run build"
