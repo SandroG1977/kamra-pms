@@ -82,6 +82,7 @@ interface Showcase {
     children_capacity: number
     max_total_occupants?: number
     bed_type: string | null
+    bed_configuration?: string | null
     room_view: string | null
     amenities: string[]
     media: { media_type: string; url: string; caption: string | null }[]
@@ -501,7 +502,9 @@ export default function PublicListing() {
                 <p className="mt-2 inline-flex items-center gap-1.5 text-sm text-zinc-600">
                   <Users className="size-4" aria-hidden />
                   {t("Up to {n} guests", { n: primary.max_total_occupants || primary.adults_capacity })}
-                  {primary.bed_type ? ` · ${t("{type} bed", { type: primary.bed_type })}` : ""}
+                  {(primary.bed_configuration || primary.bed_type)
+                    ? ` · ${primary.bed_configuration ? translate(primary.bed_configuration) : t("{type} bed", { type: primary.bed_type || "" })}`
+                    : ""}
                   {primary.room_view ? ` · ${primary.room_view}` : ""}
                 </p>
               )}

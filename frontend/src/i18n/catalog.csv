@@ -1077,6 +1077,7 @@ Batch print (,Batch print (,طباعة دفعة واحدة (,Impresión por lote
 Bathroom,Bathroom,الحمام,Baño,components/RoomDrawer.tsx,,translated
 Bed,Bed,السرير,Cama,components/RoomDrawer.tsx,,translated
 Bed type,Bed type,نوع السرير,Tipo de cama,,,translated
+Bed configuration,Bed configuration,توزيع الأسرّة,Configuración de camas,,,translated
 Before,Before,قبل,Antes,,,translated
 before {tax},before {tax},قبل {tax},antes de {tax},screens/FolioView.tsx,tax,translated
 "Before check-out: withhold anything for damage, then refund the rest.","Before check-out: withhold anything for damage, then refund the rest.",قبل المغادرة: احتجز ما يلزم مقابل الأضرار، ثم أعد الباقي.,"Antes de registrar la salida, retenga cualquier importe por daños y reembolse el saldo.",components/SecurityDepositPanel.tsx,,translated

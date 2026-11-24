@@ -97,6 +97,7 @@ export const roomTypesConfig: ScreenConfig = {
     { field: "small_group_days", label: "Small-group days (e.g. sun, mon, tue, wed, thu)", type: "data", hint: "Blank = every day", dependsOn: (d) => Number(d.small_group_max_adults) > 0 },
     { field: "small_group_whole_stay", label: "Small-group rate needs the whole stay", type: "check", hint: "A stay touching a non-small-group day is charged at the house rate throughout", dependsOn: (d) => Number(d.small_group_max_adults) > 0 },
     { field: "bed_type", label: "Bed type", type: "select", options: ["King", "Queen", "Twin", "Double", "Single"], dependsOn: (d) => d.room_category !== "Villa" },
+    { field: "bed_configuration", label: "Bed configuration", type: "data", hint: "Detailed bed breakdown (e.g. 1 Cama de Casal + 1 Beliche, or 2 Camas Queen). Displays on booking pages.", dependsOn: (d) => d.room_category !== "Villa" },
     { field: "air_conditioning", label: "Air Conditioning", type: "select", options: ["AC", "Non AC"], dependsOn: (d) => d.room_category !== "Villa" },
     // { field: "bathroom", label: "Bathroom Type", type: "select", options: ["Attached", "Common"], dependsOn: (d) => d.room_category !== "Villa" },
     // { field: "kitchen", label: "Kitchen Access", type: "check", dependsOn: (d) => d.room_category !== "Villa" },
