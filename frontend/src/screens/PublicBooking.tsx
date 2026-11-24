@@ -108,6 +108,7 @@ interface Showcase {
     adults_capacity: number
     children_capacity: number
     bed_type: string | null
+    bed_configuration?: string | null
     room_view: string | null
     amenities: string[]
     media: { media_type: string; url: string; caption: string | null }[]
@@ -1351,10 +1352,10 @@ export default function PublicBooking() {
                                   ? tn(rt.children_capacity, "Sleeps {adults} adults and {n} child", "Sleeps {adults} adults and {n} children", { adults: rt.adults_capacity })
                                   : t("Up to {n} adults", { n: rt.adults_capacity })}
                               </li>
-                              {rt.bed_type && (
+                              {(rt.bed_configuration || rt.bed_type) && (
                                 <li className="flex items-center gap-2">
                                   <BedDouble className="size-4 shrink-0 text-zinc-400" aria-hidden />
-                                  {t("{type} bed", { type: translate(rt.bed_type) })}
+                                  {rt.bed_configuration ? translate(rt.bed_configuration) : t("{type} bed", { type: translate(rt.bed_type || "") })}
                                 </li>
                               )}
                               {rt.room_view && (

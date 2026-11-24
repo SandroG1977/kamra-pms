@@ -1179,6 +1179,7 @@ Batch print (,Batch print (,طباعة دفعة واحدة (,Impresión por lote
 Bathroom,Bathroom,الحمام,Baño,Banheiro,浴室,components/RoomDrawer.tsx,,translated
 Bed,Bed,السرير,Cama,Cama,床,components/RoomDrawer.tsx,,translated
 Bed type,Bed type,نوع السرير,Tipo de cama,Tipo de cama,床型,,,translated
+Bed configuration,Bed configuration,توزيع الأسرّة,Configuración de camas,Configuração de camas,床位配置,screens/configs.ts,,translated
 Before,Before,قبل,Antes,Antes,之前,,,translated
 before {tax},before {tax},قبل {tax},antes de {tax},antes de {tax},税前（{tax}）,screens/FolioView.tsx,tax,translated
 "Before check-out: withhold a deposit refund, or collect a damage or incidentals charge.","Before check-out: withhold a deposit refund, or collect a damage or incidentals charge.",,,Antes do check-out: retenha o reembolso da caução ou cobre taxa por danos ou extras.,退房前：扣留押金退款，或收取损坏/杂费。,,,needs_translation

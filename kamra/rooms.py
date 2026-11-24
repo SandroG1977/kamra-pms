@@ -181,7 +181,7 @@ def room_detail(room: str):
 	rt = frappe.db.get_value(
 		"Room Type", r.room_type,
 		["name", "room_type_name", "room_category", "description", "bed_type",
-		 "room_view", "amenities", "air_conditioning", "bathroom",
+		 "bed_configuration", "room_view", "amenities", "air_conditioning", "bathroom",
 		 "smoking_allowed", "kitchen", "adults_capacity", "children_capacity",
 		 "max_extra_beds", "image"], as_dict=True) or {}
 	photos = []

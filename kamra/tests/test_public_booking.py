@@ -39,6 +39,17 @@ class PublicBookingTestCase(IntegrationTestCase):
 		self.assertNotIn("list_amount", plans[""])
 		self.assertIn("advance_due", plans[""])
 
+	def test_showcase_payload_includes_bed_configuration(self):
+		data = showcase(self.property)
+		rt = [r for r in data["room_types"] if r["name"] == self.room_type][0]
+		self.assertIn("bed_configuration", rt)
+		self.assertIsNone(rt["bed_configuration"])
+
+		frappe.db.set_value("Room Type", self.room_type, "bed_configuration", "1 Double + 1 Bunk bed")
+		data = showcase(self.property)
+		rt = [r for r in data["room_types"] if r["name"] == self.room_type][0]
+		self.assertEqual(rt["bed_configuration"], "1 Double + 1 Bunk bed")
+
 	def test_free_meal_plan_is_the_room_only_rate(self):
 		ep = frappe.get_doc({"doctype": "Meal Plan", "property": self.property,
 			"code": "EP", "label": "Room only"}).insert(ignore_permissions=True).name

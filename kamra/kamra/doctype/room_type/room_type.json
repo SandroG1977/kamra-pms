@@ -47,6 +47,7 @@
   "children_capacity",
   "max_total_occupants",
   "bed_type",
+  "bed_configuration",
   "column_break_at",
   "room_view",
   "smoking_allowed",
@@ -295,6 +296,13 @@
    "fieldtype": "Select",
    "label": "Bed Type",
    "options": "\nKing\nQueen\nTwin\nDouble\nSingle"
+  },
+  {
+   "depends_on": "eval:doc.room_category !== 'Villa'",
+   "description": "Optional bed breakdown, e.g. 1 Double bed + 1 Bunk bed, or 2 Queen beds",
+   "fieldname": "bed_configuration",
+   "fieldtype": "Data",
+   "label": "Bed Configuration"
   },
   {
    "fieldname": "column_break_at",

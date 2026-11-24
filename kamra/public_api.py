@@ -38,6 +38,7 @@ def _room_type_payload(rt) -> dict:
 		"adults_capacity": rt.adults_capacity,
 		"children_capacity": rt.children_capacity,
 		"bed_type": rt.bed_type,
+		"bed_configuration": rt.get("bed_configuration"),
 		"room_view": rt.room_view,
 		"room_category": rt.get("room_category"),
 		"amenities": [a.strip() for a in re.split(r"[,\n]", rt.amenities or "") if a.strip()],

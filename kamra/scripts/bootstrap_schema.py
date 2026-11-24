@@ -111,6 +111,7 @@ def execute():
         f("children_capacity", "Int", default="1"),
         f("max_total_occupants", "Int"),
         f("bed_type", "Select", options="\nKing\nQueen\nTwin\nDouble\nSingle"),
+        f("bed_configuration", "Data", label="Bed Configuration"),
         f("column_break_at", "Column Break"),
         f("room_view", "Data", label="View"),
         f("smoking_allowed", "Check"),
