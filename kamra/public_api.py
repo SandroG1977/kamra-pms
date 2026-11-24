@@ -220,7 +220,7 @@ def catalog_index(property_slug: str | None = None):
 			"sites": sites,
 			"ui_locale": _public_locale(property_name),
 		}
-	if len(room_types) == 1 and room_types[0].get("listing_slug"):
+	if (getattr(prop, "property_kind", None) or "Hotel") != "Hotel" and len(room_types) == 1 and room_types[0].get("listing_slug"):
 		return {
 			"mode": "single_listing",
 			"property": property_name,
