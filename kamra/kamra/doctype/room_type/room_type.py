@@ -9,6 +9,8 @@ class RoomType(Document):
 	def validate(self):
 		from kamra.booking_slugs import slugify, unique_listing_slug
 
+		if not int(self.max_total_occupants or 0) and int(self.adults_capacity or 0):
+			self.max_total_occupants = self.adults_capacity
 		if not (self.listing_slug or "").strip():
 			self.listing_slug = unique_listing_slug(
 				self.property, self.room_type_name, exclude=self.name,
