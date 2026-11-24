@@ -100,7 +100,7 @@ Today looks the way it always has (Open tasks starts hidden).
 Check-in is a short list of steps, one screen each, in the order your
 property set. The same steps open from every **Check in** button: the
 arrival on **Today**, the booking under **Reservations**, a stay on the
-**Tape Chart**, an arrival in **End of Day**, and a walk-in.
+**Tape Chart**, an arrival in **Night Audit**, and a walk-in.
 
 1. On **Today**, find the guest under **Arrivals** and click **Check in**.
 2. Work through the steps at the top of the panel. Each step says what to
@@ -190,6 +190,16 @@ room is free for someone, they are listed and the rest still go in.
 
 IDs, deposits and the registration card can then be finished room by room
 with **Finish** on each row, while the group is already on its way up.
+
+### Several stays at once from Today
+
+On **Today**, tick the stays under **Arrivals** or **Departures** (or
+**Select all**), then press **Check in**, **Cancel** or **Check out** in
+the bar above the list. Cancel asks you to confirm and applies the
+cancellation policy to each booking. Each stay goes through the same checks
+as it would on its own, for example a room must be assigned to check in.
+When Kamra finishes, it lists every stay with **Done**, or the reason that
+stay didn't go through. One stay that fails never stops the others.
 
 ## Check in a walk-in
 

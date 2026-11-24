@@ -21,7 +21,7 @@ classic bench install.
 **Software (bare-metal bench path)**
 
 - Python **3.14** (Frappe v16 requirement) · Node **≥ 20** + yarn
-- MariaDB **10.6+ / 11.x** (utf8mb4) · Redis
+- MariaDB **10.6+ / 11.x** (utf8mb4) · Redis or Valkey (RESP-compatible)
 - wkhtmltopdf (invoice PDFs) · nginx + supervisor (production)
 
 **Accounts / keys (optional but typical)**
@@ -84,15 +84,29 @@ sudo bench setup production $(whoami)   # nginx + supervisor + SSL
 
 ## Updating
 
-Docker install: `sudo /opt/kamra/install.sh update` (rebuilds the image,
-recreates containers, migrates every site).
+**Rule: no backup, no update.** Every update takes a full backup first
+(`bench backup --with-files`). If the backup fails, stop — do not
+migrate.
+
+Docker install: `sudo /opt/kamra/install.sh update` (backs up every site
+and **aborts if backup fails**, then rebuilds/pulls the image, recreates
+containers, migrates every site).
 
 Bench install:
 
 ```bash
+bench --site pms.yourhotel.com backup --with-files   # required; stop if it fails
 cd frappe-bench/apps/kamra && git pull
 bench --site pms.yourhotel.com migrate
 bench build && bench restart
+```
+
+Or use the wrapper that refuses to continue without a successful backup:
+
+```bash
+sudo /opt/kamra/update-bench.sh pms.yourhotel.com
+# copies to /opt/kamra when you install from deploy/; from a checkout:
+#   ./deploy/update-bench.sh pms.yourhotel.com
 ```
 
 The eval harness (`kamra/scripts/eval_harness.py`) can be run via

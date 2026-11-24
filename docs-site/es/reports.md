@@ -70,11 +70,12 @@ su rol puede abrir (consulte
    pulse **Vista previa**.
 2. Pulse **Guardar** para conservar la definición en **Mis informes**.
    Finanzas y el Administrador del hotel pueden **compartir** un informe con
-   el alojamiento y programar un envío por correo **Diario** o **Semanal**
-   (destinatarios y hora).
+   el alojamiento y programar un envío por correo **Diario**, **Semanal** o
+   **Mensual** (destinatarios y hora).
 3. **CSV**, **Imprimir** y **Correo electrónico** funcionan con informes
    nuevos o guardados. Los envíos programados adjuntan el día de ayer (o
-   los últimos 7 días si es semanal) en CSV.
+   los últimos 7 días si es semanal, o el mes anterior si es mensual,
+   enviado el día 1) en CSV.
 
 ### Agrupar y ver el detalle
 
@@ -170,12 +171,12 @@ habitaciones**, **Ocupación (%)**, **ADR / ARR** y **RevPAR**, cada uno
 con la desviación y cuánto de la meta ha alcanzado.
 
 "Resultados" cuenta las noches de habitación registradas en los folios, y
-el Cierre del día registra cada noche, así que esta noche cuenta después de
+la auditoría nocturna registra cada noche, así que esta noche cuenta después de
 la auditoría de esta noche. La ocupación y el RevPAR se calculan sobre los
 días del mes transcurridos hasta la fecha operativa, no sobre el mes
 completo, para que se comparen de forma justa con una meta mensual. La nota
 bajo la tabla indica cuántas noches de habitación están registradas y sobre
-cuántos días. Si hay noches vendidas que todavía esperan el Cierre del día,
+cuántos días. Si hay noches vendidas que todavía esperan la auditoría nocturna,
 indica cuántas, en ámbar.
 
 ![Presupuesto frente a resultados del mes: acumulado real del mes, meta, desviación y grado de cumplimiento para ingresos por habitaciones, ocupación, ADR y RevPAR, con la nota sobre noches de habitación registradas y pendientes debajo](/img/reports/budget-vs-actual.png)

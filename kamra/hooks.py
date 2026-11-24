@@ -7,7 +7,7 @@ app_description = (
 	"agents can run the property."
 )
 app_email = "hello@kamrapms.com"
-app_license = "agpl-3.0"
+app_license = "apache-2.0"
 
 # Branding shown in the Desk navbar, app switcher and marketplace listing.
 app_logo_url = "/assets/kamra/kamra-mark.svg"
@@ -54,6 +54,8 @@ scheduler_events = {
 			# group blocks past their cutoff give unpicked rooms back to sale
 			"kamra.group_blocks.release_expired_blocks",
 			"kamra.no_show.release_non_guaranteed_arrivals",
+			# day-use past planned ETD → front-desk bell once per stay
+			"kamra.day_use.alert_overdue_day_use",
 		],
 		# 08:30 - the banquet team's morning list: follow-ups gone quiet,
 		# tentative holds about to lapse, payments due, event orders missing
@@ -63,7 +65,9 @@ scheduler_events = {
 		"15 4 * * *": ["kamra.scripts.reset_demo.scheduled"],
 		# 03:30 - storage limitation (DPDP s.8(7)): erase guests idle past
 		# their property's retention period
-		"30 3 * * *": ["kamra.privacy.apply_retention"],
+		"30 3 * * *": ["kamra.privacy.apply_retention",
+		               # recreation memberships past their last day (#632)
+		               "kamra.recreation.expire_memberships"],
 		# 03:40 - the same for conversations: WhatsApp message text and AI
 		# assistant chats past the property's message retention period
 		"40 3 * * *": ["kamra.privacy.apply_message_retention"],
@@ -77,8 +81,17 @@ scheduler_events = {
 		"45 4 * * *": ["kamra.hosting_enquiry_retention.purge_expired_hosting_enquiries"],
 		# 06:00 and 18:00 - warm the GitHub latest-release cache for the update nag
 		"0 6,18 * * *": ["kamra.health.poll_github_releases"],
-		# every minute - outbound webhook retries that are due (backoff)
-		"* * * * *": ["kamra.webhooks.retry_due"],
+		# 05:35 - the anonymous install heartbeat (#657); off in Settings,
+		# or with KAMRA_TELEMETRY=0 / DO_NOT_TRACK=1 / kamra_telemetry: 0
+		# ponytail: one fixed minute for every install; add jitter if the endpoint sees bursts
+		"35 5 * * *": ["kamra.telemetry.send_heartbeat"],
+		# every minute - outbound webhook retries that are due (backoff), and
+		# the ARI outbox: what waited for its batch window, pause or retry
+		"* * * * *": ["kamra.webhooks.retry_due", "kamra.channel_ari.enqueue_ari_flushes"],
+		# 06:20 - the ARI outbox's nightly sweep: only differences (the day
+		# entering the 500-day horizon, what a trigger missed); never a full
+		# sync on a timer
+		"20 6 * * *": ["kamra.channel_ari.nightly_sweep"],
 	},
 }
 
@@ -105,6 +118,8 @@ kamra_localization = {
 	"Saudi Arabia": "kamra.localization.saudi",
 	"Brazil": "kamra.localization.brazil",
 	"Nicaragua": "kamra.localization.nicaragua",
+	"Germany": "kamra.localization.germany",
+	"Philippines": "kamra.localization.philippines",
 }
 
 # Served single-page app
@@ -152,6 +167,11 @@ website_route_rules = [
 website_redirects = [
 	{"source": r"/kamra$", "target": "/"},
 	{"source": r"/kamra/(.*)", "target": r"/\1"},
+	{
+		"source": r"/update-password$",
+		"target": "/update-password",
+		"forward_query_parameters": True,
+	},
 ]
 
 # Each item in the list will be shown as an app in the apps page
@@ -280,35 +300,45 @@ _PROPERTY_SCOPED = (
 	"Agent Action Log", "AI Assistant Settings", "Allowance Request", "Banquet Checklist Template",
 	"Banquet Dish", "Banquet Function Task", "Banquet Menu",
 	"Banquet Service Item", "Cancelled Invoice", "Cash Transfer", "Cashier", "Cashier Session", "Cashier Terminal",
-	"Cashier Transaction", "Channel Manager Connection",
+	"Cashier Transaction", "Channel ARI Outbox", "Channel Manager Connection",
 	"Channel Provider Connection", "City Ledger Account", "City Ledger Entry",
-	"Copilot Conversation", "Credit Note", "Discount Voucher", "Exchange Rate",
+	"Copilot Conversation", "Credit Note", "Discount Voucher", "ERPNext Sync Log", "Exchange Rate",
 	"Exchange Transaction", "Experience", "External POS Charge", "Floor", "Folio", "Folio Ledger Entry",
-	"Folio Reprint", "Group Booking", "Housekeeping Task", "Hurdle Rate",
+	"Folio Reprint", "Group Booking", "Holiday Package", "Housekeeping Task", "Hurdle Rate",
 	"Ingredient", "Ingredient Ledger Entry", "Ingredient Stock", "Kamra Custom Report", "Kamra Notification", "Kitchen Printer",
 	"Laundry Order", "Laundry Rate", "Lost And Found Item", "MCP OAuth Grant",
 	"Meal Plan", "Menu Item", "Night Audit Log", "Night Audit Run", "Outbound Webhook",
 	"Outbound Webhook Delivery", "Payment Gateway Settings",
 	"Petty Cash Voucher", "POS Order", "POS Outlet", "POS Table Reservation",
 	"Print Job",
-	"Proforma Folio", "Property Setting", "Rate Guardrail", "Rate Plan",
+	"Proforma Folio", "Property Setting", "Rate Guardrail", "Rate Plan", "Rate Restriction",
+	"Recreation Booking", "Recreation Customer", "Recreation Facility",
+	"Recreation Membership", "Recreation Plan", "Recreation Therapist",
+	"Recreation Treatment", "Recreation Visit",
 	"Reservation",
-	"Long Stay Discount", "Revenue Budget", "Room", "Room Block", "Room Type", "Season",
+	"Long Stay Discount", "Revenue Budget", "Room", "Room Block", "Room Discrepancy", "Room Type", "Season",
 	"Security Deposit", "Sellable Unit", "Service Ticket", "Shift Handover", "SOP Template", "Ticket Event",
-	"Transaction Code", "Turnover Profile", "Vendor", "Vendor Bill", "Venue", "Venue Booking",
+	"Tax Withheld", "Transaction Code", "Turnover Profile", "Vendor", "Vendor Bill", "Venue", "Venue Booking",
 	"WhatsApp Message", "ZATCA Invoice", "ZATCA Settings",
 )
+
+# These hang from a channel connection and have no property field: they are
+# scoped through their connection's property, with the strict scope off too
+# (kamra.authz.connection_query_conditions).
+_CONNECTION_SCOPED = ("Channel ARI State", "Channel Room Mapping")
 
 permission_query_conditions = {
 	"Guest": "kamra.authz.guest_query_conditions",
 	"Itinerary": "kamra.authz.itinerary_query_conditions",
 	**{dt: "kamra.authz.property_query_conditions" for dt in _PROPERTY_SCOPED},
+	**{dt: "kamra.authz.connection_query_conditions" for dt in _CONNECTION_SCOPED},
 }
 
 has_permission = {
 	"Guest": "kamra.authz.guest_has_permission",
 	"Itinerary": "kamra.authz.itinerary_has_permission",
 	**{dt: "kamra.authz.property_has_permission" for dt in _PROPERTY_SCOPED},
+	**{dt: "kamra.authz.connection_has_permission" for dt in _CONNECTION_SCOPED},
 }
 
 # Document Events
@@ -367,6 +397,27 @@ doc_events["Reservation"] = {
 	              "kamra.notifications.on_reservation_update"],
 	"on_trash": "kamra.realtime.notify",
 }
+
+# What moves availability or price queues an ARI change for the connections
+# with an outbox (kamra.channel_ari: only changes, in ranges, under the
+# provider's rate limit). Reservations go through on_reservation_change.
+for _doctype in ("Season", "Rate Restriction", "Rate Plan", "Room Type", "Hurdle Rate", "Rate Guardrail",
+                 "Room", "Room Block", "Channel Room Mapping"):
+	_events = doc_events.setdefault(_doctype, {})
+	for _event in ("on_update", "after_insert", "on_trash"):
+		_current = _events.get(_event) or []
+		_events[_event] = ([_current] if isinstance(_current, str) else list(_current)) + [
+			"kamra.channel_ari.on_ari_source_change"]
+del _doctype, _events, _event, _current
+
+# a unit added to (or moved between) unit types an owner holds joins
+# that owner's scope at once (#639)
+_room = doc_events.setdefault("Room", {})
+for _event in ("after_insert", "on_update"):
+	_current = _room.get(_event) or []
+	_room[_event] = ([_current] if isinstance(_current, str) else list(_current)) + [
+		"kamra.owners.on_room_change"]
+del _room, _event, _current
 
 # Scheduled Tasks
 # ---------------
@@ -446,7 +497,11 @@ before_request = [
 	# the public demo shows the maintenance page while it rebuilds
 	"kamra.demo_guard.block_while_rebuilding",
 ]
-after_request = ["kamra.mcp_http.after_request"]
+after_request = [
+	"kamra.mcp_http.after_request",
+	# every service account call goes in the Agent Action Log
+	"kamra.service_accounts.after_request",
+]
 
 # Job Events
 # ----------
@@ -480,7 +535,12 @@ after_request = ["kamra.mcp_http.after_request"]
 # Authentication and authorization
 # --------------------------------
 
-auth_hooks = ["kamra.mcp_http.authenticate"]
+auth_hooks = [
+	"kamra.mcp_http.authenticate",
+	# a service account key reaches only its scoped endpoints (after the
+	# key has been resolved to its user, before the endpoint runs)
+	"kamra.service_accounts.enforce_scope",
+]
 
 # Automatically update python controller files with type annotations for this app.
 # export_python_type_annotations = True

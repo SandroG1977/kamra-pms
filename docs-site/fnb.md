@@ -89,7 +89,7 @@ Only the new lines go to the kitchen.
 deciding. It stays in **Open bills → Open, not sent to kitchen**, with how
 long it has waited. After 15 minutes (change it in **Settings → F&B**) the
 bill turns red on the till and a red dot shows on **Orders**, so a
-forgotten order gets sent or cancelled. End of Day lists it as *open, not
+forgotten order gets sent or cancelled. Night Audit lists it as *open, not
 sent to kitchen*.
 
 ## The table map
@@ -113,8 +113,8 @@ Hall, Patio…) or search a table.
 ## Settle a bill
 
 1. Open the bill and press **Settle** (or **F4**).
-2. Pick how the guest pays: **Cash**, **Card** or your country's instant mode
-   (**UPI** in India). Or post it to an
+2. Pick how the guest pays: **Cash**, **Card**, **Bank Transfer** or your
+   country's instant mode (**UPI** in India, **QRIS** in Indonesia). Or post it to an
    in-house guest's room with **Charge to room**.
 3. **Print bill** prints the bill on the till's printer, with the tax split
    your country uses. The bill shows **Served by** (the waiter, or the

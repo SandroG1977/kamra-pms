@@ -51,13 +51,14 @@ necesitan un motivo.
 
 ## Auditoría nocturna
 
-El asistente de **Cierre del día** revisa las llegadas, las salidas, las
-cuentas abiertas del restaurante y las cajas, le permite confirmar o
-corregir cada una, y después registra las noches, aplica la política de no
-presentación y guarda un paquete de auditoría con los informes del día.
-También se ejecuta solo a las 03:00.
+La **Auditoría nocturna** es una sola página: muestra solo lo que le
+necesita (salidas que siguen alojadas, cuentas abiertas del restaurante,
+cajas abiertas y lo demás), le permite corregir cada punto o autorizar una
+excepción, y después registra las noches, aplica la política de no
+presentación y guarda un paquete de auditoría con los informes del día,
+cada tabla exportable a CSV. También se ejecuta sola a las 03:00.
 
-![El asistente de Cierre del día](/img/night-audit/wizard.png)
+![Cierre del día: la fecha y el botón Cerrar arriba, cuántas comprobaciones están listas y lo que le necesita](/img/night-audit/close-day.png)
 
 [Guía de auditoría nocturna →](/es/night-audit)
 
@@ -150,10 +151,11 @@ completo en línea.
 El país del alojamiento elige un **paquete de localización**: reglas y
 etiquetas de impuestos, textos de la factura, moneda y formato de números,
 los documentos de identidad que acepta la recepción y las formas de pago.
-Hay paquetes para la India (GST), Indonesia, Tailandia, Malasia, los
-Emiratos Árabes Unidos y Arabia Saudí (con facturación electrónica ZATCA),
-además de un paquete de impuesto único para el resto de países. Añadir un
-país es un solo archivo de Python. Consulte
+Hay paquetes para la India (GST), Indonesia, Tailandia, Malasia, Filipinas,
+los Emiratos Árabes Unidos y Arabia Saudí (con facturación electrónica ZATCA),
+Brasil, Alemania (7% de MwSt en el alojamiento, 19% en comida y servicios)
+y Nicaragua, además de un paquete de impuesto único para el resto de
+países. Añadir un país es un solo archivo de Python. Consulte
 [Configuración por país](/country-setup).
 
 ## Alquileres de corta estancia

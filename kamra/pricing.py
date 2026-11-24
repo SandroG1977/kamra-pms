@@ -9,6 +9,7 @@ no LLM ever computes money. Resolution order per night:
 from decimal import Decimal
 
 import frappe
+from frappe import _
 from frappe.utils import add_days, cint, date_diff, getdate, nowdate
 
 from kamra.localization import default_currency, pack_for
@@ -444,6 +445,98 @@ def rates_include_tax(property: str) -> bool:
 	return bool(frappe.get_cached_doc("Property", property).get("rates_include_tax"))
 
 
+def rates_include_levy(property: str) -> bool:
+	"""Do the displayed room prices already contain the room levy? Off - and
+	meaningless - when the property charges no levy."""
+	prop = frappe.get_cached_doc("Property", property)
+	return bool(prop.get("rates_include_levy")) and _dec(prop.get("room_levy_percent")) > 0
+
+
+def room_rate_digits(property: str) -> int:
+	"""Decimals a stored room-night rate keeps.
+
+	A price shown to the guest with the tax (and / or the levy) inside it is
+	split by division, and the pieces only add back up to the shown price when
+	the pre-tax rate keeps 6 decimals (100 with 10% tax inside is 90.909091;
+	stored as 90.91 it bills 100.001). A property that shows prices before tax
+	and levy keeps the 2 decimals it always had."""
+	return 6 if rates_include_tax(property) or rates_include_levy(property) else 2
+
+
+def levy_digits(property: str) -> int:
+	"""Decimals a posted levy line keeps: 6 only when the levy sits inside the
+	displayed price, where it has to add back to that price exactly. Otherwise
+	it is a charge on top of the price, in whole cents."""
+	return 6 if rates_include_levy(property) else 2
+
+
+def room_net_rate(property: str, room_type_doc, displayed, over_cap=0, *,
+                  tax_included: bool | None = None) -> tuple[Decimal, Decimal]:
+	"""(pre-tax room rate, tax %) for one displayed room price.
+
+	The one place a displayed price is split. What the desk types is what the
+	guest is shown, and it may contain the room levy and / or the room tax
+	(Settings: Displayed rates include tax / the levy). The levy comes out
+	first, then the tax, because the levy is a % of the pre-tax rate and the
+	tax is a % of the rate plus the levy (unless the levy is untaxed):
+
+	    levy taxed:     price = net x (1 + levy) x (1 + tax)
+	    levy untaxed:   price = net x (1 + tax + levy)
+
+	The tax slab reads the price without the levy, the same basis it reads
+	when only tax is included. `over_cap` is the night's agreed extra-bed
+	amount: it bills as its own line but counts toward the slab. With neither
+	included the price is the rate and nothing else changes.
+	`tax_included` overrides the property's setting for a price that is
+	always tax-inclusive (an OTA's total)."""
+	displayed, over_cap = _dec(displayed), _dec(over_cap)
+	taxed = rates_include_tax(property) if tax_included is None else tax_included
+	prop = frappe.get_cached_doc("Property", property)
+	levy = (_dec(prop.get("room_levy_percent")) / Decimal(100)
+	        if rates_include_levy(property) else Decimal(0))
+	if not levy:
+		gst = room_gst_rate(property, room_type_doc, displayed + over_cap)
+		return (displayed / (Decimal(1) + gst / Decimal(100)) if taxed else displayed), gst
+	levy_taxed = cint(prop.get("room_levy_taxable")
+	                  if prop.get("room_levy_taxable") is not None else 1)
+	if not taxed or levy_taxed:
+		without_levy = displayed / (Decimal(1) + levy)
+		gst = room_gst_rate(property, room_type_doc, without_levy + over_cap)
+		return (without_levy / (Decimal(1) + gst / Decimal(100)) if taxed else without_levy), gst
+	# tax and an untaxed levy are both inside: the slab reads net x (1 + tax),
+	# which depends on the tax it picks, so let the two settle
+	gst = room_gst_rate(property, room_type_doc, displayed + over_cap)
+	for _round in range(4):
+		net = displayed / (Decimal(1) + gst / Decimal(100) + levy)
+		again = room_gst_rate(property, room_type_doc,
+		                      net * (Decimal(1) + gst / Decimal(100)) + over_cap)
+		if again == gst:
+			break
+		gst = again
+	return displayed / (Decimal(1) + gst / Decimal(100) + levy), gst
+
+
+def room_displayed_rate(property: str, net, gst, *,
+                        tax_included: bool | None = None) -> Decimal:
+	"""The price a guest is shown for a pre-tax room rate: room_net_rate
+	backwards, for the places that need the displayed figure from a net one."""
+	net, gst = _dec(net), _dec(gst)
+	taxed = rates_include_tax(property) if tax_included is None else tax_included
+	prop = frappe.get_cached_doc("Property", property)
+	levy = (_dec(prop.get("room_levy_percent")) / Decimal(100)
+	        if rates_include_levy(property) else Decimal(0))
+	tax = Decimal(1) + gst / Decimal(100)
+	if not levy:
+		return net * tax if taxed else net
+	if not taxed:
+		return net * (Decimal(1) + levy)
+	levy_taxed = cint(prop.get("room_levy_taxable")
+	                  if prop.get("room_levy_taxable") is not None else 1)
+	if levy_taxed:
+		return net * (Decimal(1) + levy) * tax
+	return net * (tax + levy)
+
+
 def stay_season_rules(property: str, check_in, check_out,
                       room_type: str | None = None) -> dict:
 	"""The strictest season rules a stay runs into.
@@ -509,6 +602,81 @@ def stay_season_rules(property: str, check_in, check_out,
 	        "holiday": holiday, "advance_percent": advance_pct,
 	        "advance_season": advance_season,
 	        "package": pkg.package_name if pkg else None}
+# ── Stay restrictions (Rate Restriction, #530) ──────────────────────────────
+# Per rate plan, room type and dates, with a day list for day-of-week
+# overrides. Overlapping rules take the strictest value. Min / max nights
+# and closed to arrival read the arrival date (Channex min_stay_arrival),
+# closed to departure the departure date, stop-sell every night stayed.
+
+def restriction_rules(property: str, room_type: str | None, rate_plan: str | None,
+                      start, end, any_plan: bool = False) -> list:
+	"""The enabled Rate Restrictions touching [start, end] for this room type
+	and plan (blank fields on a rule mean every type / every plan).
+	any_plan: every plan's rules (the rate calendar lists them all)."""
+	filters = {"property": property, "disabled": 0,
+	           "start_date": ("<=", end), "end_date": (">=", start)}
+	if room_type:
+		filters["room_type"] = ("in", [room_type, "", None])
+	if not any_plan:
+		filters["rate_plan"] = ("in", [rate_plan or "", "", None])
+	return frappe.get_all(
+		"Rate Restriction", filters=filters,
+		fields=["name", "restriction_name", "rate_plan", "room_type", "start_date",
+		        "end_date", "days_of_week", "min_nights", "max_nights",
+		        "closed_to_arrival", "closed_to_departure", "stop_sell"])
+
+
+def rules_on(rules: list, date) -> list:
+	day = getdate(date)
+	abbr = day.strftime("%a").lower()
+	return [r for r in rules if getdate(r.start_date) <= day <= getdate(r.end_date)
+	        and days_cover(r.days_of_week, abbr)]
+
+
+def day_restrictions(rules: list, date) -> dict:
+	"""The strictest of the rules on one date. max_nights 0 = no maximum."""
+	on = rules_on(rules, date)
+	maxes = [cint(r.max_nights) for r in on if cint(r.max_nights)]
+	return {"min_nights": max([cint(r.min_nights) for r in on], default=0),
+	        "max_nights": min(maxes, default=0),
+	        "closed_to_arrival": any(r.closed_to_arrival for r in on),
+	        "closed_to_departure": any(r.closed_to_departure for r in on),
+	        "stop_sell": any(r.stop_sell for r in on)}
+
+
+def stay_restriction_error(property: str, room_type: str, rate_plan: str | None,
+                           check_in, check_out) -> str | None:
+	"""Why this stay breaks a restriction, or None when it doesn't."""
+	nights = date_diff(check_out, check_in)
+	if nights <= 0:
+		return None  # ponytail: day use is not restricted; add when a property asks
+	rules = restriction_rules(property, room_type, rate_plan, check_in, check_out)
+	if not rules:
+		return None
+	for i in range(nights):
+		d = add_days(check_in, i)
+		if day_restrictions(rules, d)["stop_sell"]:
+			return _("{0} is closed for sale on {1}.").format(
+				rate_plan or _("This room type"), d)
+	arrival = day_restrictions(rules, check_in)
+	if arrival["closed_to_arrival"]:
+		return _("Arrivals are closed on {0}.").format(check_in)
+	if arrival["min_nights"] > nights:
+		return _("A stay arriving on {0} needs at least {1} nights.").format(
+			check_in, arrival["min_nights"])
+	if arrival["max_nights"] and nights > arrival["max_nights"]:
+		return _("A stay arriving on {0} can be at most {1} nights.").format(
+			check_in, arrival["max_nights"])
+	if day_restrictions(rules, check_out)["closed_to_departure"]:
+		return _("Departures are closed on {0}.").format(check_out)
+	return None
+
+
+def assert_stay_restrictions(property: str, room_type: str, rate_plan: str | None,
+                             check_in, check_out) -> None:
+	why = stay_restriction_error(property, room_type, rate_plan, check_in, check_out)
+	if why:
+		frappe.throw(why, title=_("Stay restriction"))
 
 
 def advance_percent(property: str, stay_rules: dict) -> tuple[float, str | None]:
@@ -646,6 +814,71 @@ def negotiated_rate_plan(property: str, company: str | None) -> str | None:
 	return None
 
 
+# A typed nightly price is a sanity-checked figure, not a free-for-all: the
+# bound is far above any real room rate in any currency but stops a stray
+# digit string (or an overflow probe) from reaching the ledger.
+MAX_NIGHT_PRICE = Decimal("100000000")
+
+
+def refuse_with_night_prices(what: str):
+	"""Nights priced by hand and `what` both set the room price: say so."""
+	frappe.throw(
+		_("Nightly prices typed by hand cannot be combined with {0}. "
+		  "Clear the typed prices, or remove {0}.").format(what),
+		title=_("Prices typed by hand"))
+
+
+def normalize_night_prices(night_prices, check_in_date, check_out_date) -> dict:
+	"""Validate the nightly prices a desk typed: [{date, price}, ...] (a JSON
+	string works too). Returns {"YYYY-MM-DD": Decimal} - empty when none were
+	typed. Nothing is coerced or dropped: a malformed payload, a date outside
+	the stay, a repeated date, or a price that is not a finite number above
+	zero (with at most 2 decimals) is refused with the reason."""
+	if night_prices in (None, "", [], {}):
+		return {}
+	if isinstance(night_prices, str):
+		try:
+			night_prices = frappe.parse_json(night_prices)
+		except Exception:
+			frappe.throw(_("night_prices must be a list of {date, price}."))
+	if not isinstance(night_prices, (list, tuple)):
+		frappe.throw(_("night_prices must be a list of {date, price}."))
+	if date_diff(check_out_date, check_in_date) < 1:
+		frappe.throw(_("Nightly prices need an overnight stay; a day-use stay is priced by its time slot."))
+	first, last = getdate(check_in_date), getdate(check_out_date)
+	out: dict = {}
+	for row in night_prices:
+		if not isinstance(row, dict) or set(row) != {"date", "price"}:
+			frappe.throw(_("Each night price must be exactly {date, price}."))
+		try:
+			day = getdate(row["date"])
+		except Exception:
+			day = None
+		if not day or not isinstance(row["date"], str):
+			frappe.throw(_("{0} is not a valid night.").format(row["date"]))
+		if not first <= day < last:
+			frappe.throw(_("{0} is not a night of this stay ({1} to {2}).").format(
+				day, first, last))
+		if str(day) in out:
+			frappe.throw(_("The night {0} is priced twice.").format(day))
+		raw = row["price"]
+		if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+			frappe.throw(_("The price for {0} must be a number.").format(day))
+		try:
+			price = Decimal(str(raw).strip())
+		except Exception:
+			frappe.throw(_("The price for {0} must be a number.").format(day))
+		if not price.is_finite() or price <= 0:
+			frappe.throw(_("The price for {0} must be above zero.").format(day))
+		if price > MAX_NIGHT_PRICE:
+			frappe.throw(_("The price for {0} is above the highest price Kamra accepts ({1}).").format(
+				day, f"{MAX_NIGHT_PRICE:,.0f}"))
+		if price.as_tuple().exponent < -2:
+			frappe.throw(_("The price for {0} can have at most 2 decimals.").format(day))
+		out[str(day)] = price
+	return out
+
+
 def quote(
 	property: str,
 	room_type: str,
@@ -662,18 +895,30 @@ def quote(
 	pets: int = 0,
 	company: str | None = None,
 	agreed_rate: float = 0,
+	check_in_time: str | None = None,
+	check_out_time: str | None = None,
+	night_prices=None,
+	check_restrictions: bool = True,
 ) -> dict:
 	# a stay for a company is priced on the plan the company negotiated,
 	# unless the caller named a plan of its own
+	company_plan = False
 	if not rate_plan and company:
 		rate_plan = negotiated_rate_plan(property, company)
+		company_plan = bool(rate_plan)
 	nights = date_diff(check_out_date, check_in_date)
 	day_use = nights == 0
 	if nights < 0:
 		frappe.throw("Check-out cannot be before check-in.")
+	# the desk, the booking engine and agents all quote here; the channel
+	# sync and stays already on the books pass False
+	if check_restrictions:
+		assert_stay_restrictions(property, room_type, rate_plan,
+		                         check_in_date, check_out_date)
 
 	rt = frappe.get_doc("Room Type", room_type)
 	inclusive = rates_include_tax(property)
+	levy_inside = rates_include_levy(property)
 	small_ok = small_group_allows_stay(rt, check_in_date, check_out_date)
 	# holiday dates can charge a small party the house rate, as a weekend does
 	stay_rules = stay_season_rules(property, check_in_date, check_out_date,
@@ -704,8 +949,26 @@ def quote(
 	# the nights' floors (net of tax) on a long-stay discounted stay: the
 	# rate plan and a voucher stack on top and must not undercut them either
 	los_floor = Decimal(0)
+	day_use_meta = None
 
 	pkg = None if agreed_rate else active_holiday_package(property, check_in_date, check_out_date, room_type)
+
+	# Nights the desk priced by hand. Anything that would also move the room
+	# price is refused rather than quietly dropped or stacked on the typed
+	# figure: the guest was told that exact price.
+	typed = normalize_night_prices(night_prices, check_in_date, check_out_date)
+	if typed:
+		refused = (
+			(voucher_code, _("a voucher")),
+			(rate_plan and not company_plan, _("a rate plan")),
+			(company_plan, _("the company's negotiated rate plan")),
+			(agreed_rate, _("an agreed rate")),
+			(los, _("the long-stay discount")),
+			(pkg, _("a holiday package")),
+		)
+		for hit, what in refused:
+			if hit:
+				refuse_with_night_prices(what)
 	if pkg:
 		pkg_doc = frappe.get_doc("Holiday Package", pkg.name)
 		pkg_nights = int(getattr(pkg, "package_nights", None) or getattr(pkg, "minimum_nights", None) or 1)
@@ -722,9 +985,7 @@ def quote(
 				rate = (pkg_base_rate - accum) if i == billable_nights - 1 else base_per_night
 				accum += rate
 
-				gst = room_gst_rate(property, rt, rate + night_over_cap)
-				if inclusive:
-					rate = rate / (Decimal(1) + gst / Decimal(100))
+				rate, gst = room_net_rate(property, rt, rate, night_over_cap)
 				if night_over_cap:
 					net = (night_over_cap / (Decimal(1) + gst / Decimal(100))
 					       if inclusive else night_over_cap)
@@ -785,9 +1046,7 @@ def quote(
 					rate = extra_night_rate
 					label = f"{pkg.package_name} (Diária Adicional)"
 
-				gst = room_gst_rate(property, rt, rate + night_over_cap)
-				if inclusive:
-					rate = rate / (Decimal(1) + gst / Decimal(100))
+				rate, gst = room_net_rate(property, rt, rate, night_over_cap)
 				if night_over_cap:
 					net = (night_over_cap / (Decimal(1) + gst / Decimal(100))
 					       if inclusive else night_over_cap)
@@ -825,6 +1084,13 @@ def quote(
 			if agreed_rate:
 				# a rate the desk agreed replaces the card and the premium
 				rate, tier = _dec(agreed_rate), None
+			hand = typed.get(str(date))
+			if hand is not None:
+				# a night the desk priced: replaces the card, the season and
+				# any demand premium. In a tax-inclusive property the typed
+				# figure is gross, and the slab / back-out below read it the
+				# way they read the card.
+				rate, tier = hand, None
 			if los_pct:
 				off = rate * (Decimal(1) - los_pct / Decimal(100))
 				# never below the owner's floor or the hurdle tier's minimum for
@@ -835,21 +1101,20 @@ def quote(
 				            _dec(tier["min_rate"]) if tier else Decimal(0))
 				floor = min(rate, floor)
 				off = max(off, floor)
-				gst_off = room_gst_rate(property, rt, off + night_over_cap)
+				net_off, _gst_off = room_net_rate(property, rt, off, night_over_cap)
+				# what a displayed amount is worth before tax (and levy) on this night
+				share = net_off / off if (inclusive or levy_inside) and off else Decimal(1)
 				saved = rate - off
-				los_saved += (saved / (Decimal(1) + gst_off / Decimal(100))
-				              if inclusive else saved)
-				los_floor += (floor / (Decimal(1) + gst_off / Decimal(100))
-				              if inclusive else floor)
+				los_saved += saved * share
+				los_floor += floor * share
 				rate = off
 			# The agreed amount for extra beds counts toward the slab even though
 			# it bills as its own line: GST reads what the unit fetches for the
 			# day, not the occupancy its rate card started from. A room at 7,000
 			# with 2,000 of extra beds is a 9,000 night, so 18%, not 5%.
-			gst = room_gst_rate(property, rt, rate + night_over_cap)
-			if inclusive:
-				# configured price is gross — back out the taxable value
-				rate = rate / (Decimal(1) + gst / Decimal(100))
+			# the configured price is what the guest is shown: back the levy
+			# and / or the tax out of it to get the taxable room rate
+			rate, gst = room_net_rate(property, rt, rate, night_over_cap)
 			if night_over_cap:
 				net = (night_over_cap / (Decimal(1) + gst / Decimal(100))
 				       if inclusive else night_over_cap)
@@ -858,11 +1123,48 @@ def quote(
 			nightly.append({"date": str(date), "rate": float(rate),
 			                "gst_rate": float(gst),
 			                "demand_premium_pct": tier["premium_pct"] if tier else 0,
-			                "occupancy": occ_cache[str(date)]})
+			                "occupancy": occ_cache[str(date)],
+			                **({"hand_set": True, "typed_price": float(hand)}
+			                   if hand is not None else {})})
 			room_total += rate
 			room_tax += rate * gst / Decimal(100)
 
-	if rate_plan and not agreed_rate:
+	# Hourly / block day-use: replace the one nightly rate with hours/blocks
+	# from the planned slot. Overnight stays and Nightly day-use plans are
+	# untouched. An agreed desk rate still wins.
+	if day_use and not agreed_rate:
+		from kamra.day_use import quote_day_use_amount
+		# Gross nightly (before tax back-out) as the Full-day overstay stand-in.
+		nightly_gross = room_displayed_rate(
+			property, room_total, nightly[0]["gst_rate"] if nightly else 0)
+		day_use_meta = quote_day_use_amount(
+			property, rate_plan, check_in_time, check_out_time, nightly_gross)
+		if day_use_meta:
+			gross = _dec(day_use_meta["amount"])
+			rate, gst = room_net_rate(property, rt, gross, night_over_cap)
+			nightly[0] = {
+				"date": str(check_in_date), "rate": float(rate),
+				"gst_rate": float(gst),
+				"demand_premium_pct": 0,
+				"occupancy": occ_cache.get(str(check_in_date), 0),
+				"billing_basis": day_use_meta["billing_basis"],
+				"units": day_use_meta["units"],
+				"unit_rate": float(
+					rate / _dec(day_use_meta["units"])
+					if day_use_meta["units"] else rate),
+				"hours": day_use_meta["hours"],
+			}
+			room_total = rate
+			room_tax = rate * gst / Decimal(100)
+			# Hourly/block plans own the room total; nightly modifiers do not
+			# stack on top (Absolute would wipe the hour math).
+			rate_plan_applied = True
+		else:
+			rate_plan_applied = False
+	else:
+		rate_plan_applied = False
+
+	if rate_plan and not agreed_rate and not rate_plan_applied:
 		old_room_total = room_total
 		room_total = max(apply_rate_plan(rate_plan, room_total), los_floor)
 		if old_room_total:
@@ -960,10 +1262,13 @@ def quote(
 
 	deposit_required = float(prop.get("security_deposit_amount") or 0)
 
+	room_label = "Room nights"
+	if day_use_meta:
+		room_label = day_use_meta.get("description") or "Day use"
 	line_items = [
 		{
 			"component": "accommodation",
-			"description": "Room nights",
+			"description": room_label,
 			"amount": float(room_total),
 			"tax_amount": float(room_tax * (taxable / subtotal) if subtotal else 0),
 			"tax_rate": float(room_tax / room_total * 100) if room_total else 0,
@@ -1031,7 +1336,7 @@ def quote(
 	adv_pct, adv_season = advance_percent(property, stay_rules)
 
 	from frappe.utils import now_datetime
-	return {
+	out = {
 		"nights": nights,
 		"day_use": day_use,
 		"nightly": nightly,
@@ -1087,3 +1392,13 @@ def quote(
 		"is_holiday": stay_rules["is_holiday"],
 		"quoted_at": str(now_datetime()),
 	}
+	if day_use_meta:
+		out["day_use_billing"] = {
+			"billing_basis": day_use_meta["billing_basis"],
+			"units": day_use_meta["units"],
+			"hours": day_use_meta["hours"],
+			"unit_rate": day_use_meta["unit_rate"],
+			"full_day": bool(day_use_meta.get("full_day")),
+			"description": day_use_meta.get("description"),
+		}
+	return out

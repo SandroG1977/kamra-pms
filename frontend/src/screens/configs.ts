@@ -8,6 +8,7 @@ const EventLinks = lazy(() => import("../components/EventLinks"))
 const GroupControl = lazy(() => import("../components/GroupControl"))
 const RoomTypeMedia = lazy(() => import("../components/RoomTypeMedia"))
 const OutletWaiters = lazy(() => import("../components/OutletWaiters"))
+const ChannelConnectionActions = lazy(() => import("../components/ChannelConnectionActions"))
 const HkTaskMediaPanel = lazy(() =>
   import("../components/HkMedia").then((m) => ({ default: m.HkTaskMediaPanel })),
 )
@@ -41,6 +42,7 @@ export const roomsConfig: ScreenConfig = {
     { field: "housekeeping_status", label: "Status", options: ["Clean", "Dirty", "Inspected", "Ready", "Out of Order"] },
     { field: "room_type", label: "Room type", linkDoctype: "Room Type", labelField: "room_type_name", propertyScoped: true },
     { field: "floor", label: "Floor", optionsFrom: "Floor" },
+    { field: "accessible", label: "Accessible", options: ["1"], optionLabels: { "1": "Accessible rooms" } },
   ],
   pageSize: 25,
   propertyScoped: true,
@@ -58,6 +60,9 @@ export const roomsConfig: ScreenConfig = {
     { field: "floor", label: "Floor", type: "select", source: floorSource, allowNew: "Add a floor", hint: "Floors are set up in Admin > Floors. Pick one or add a new floor here." },
     { field: "housekeeping_status", label: "Housekeeping status", type: "select", options: ["Clean", "Dirty", "Inspected", "Ready", "Out of Order"] },
     { field: "notes", label: "Notes", type: "data" },
+    { field: "accessible", label: "Accessible room", type: "check", hint: "Allocation gives it to guests who need an accessible room." },
+    { field: "accessibility_features", label: "Accessibility features", type: "data", hint: "For example: roll-in shower, grab bars, wide door.", dependsOn: (d) => !!Number(d.accessible) },
+    { field: "connects_to", label: "Connecting room", type: "link", linkDoctype: "Room", hint: "The room behind the connecting door. Kept on both rooms." },
   ],
 }
 
@@ -116,13 +121,14 @@ export const ratePlansConfig: ScreenConfig = {
   doctype: "Rate Plan",
   title: "Rate Plans",
   description:
-    "Sellable plans (BAR, non-refundable, corporate). Clear Disabled to publish a plan at booking; tick it to unpublish.",
+    "Sellable plans (BAR, non-refundable, corporate, hourly day-use). Clear Disabled to publish a plan at booking; tick it to unpublish.",
   searchFields: ["rate_plan_name", "code"],
   pageSize: 25,
   propertyScoped: true,
   columns: [
     { field: "rate_plan_name", label: "Name" },
     { field: "code", label: "Code", badge: true },
+    { field: "billing_basis", label: "Day-use" },
     { field: "modifier_type", label: "Modifier" },
     { field: "modifier_value", label: "Value" },
     { field: "is_default", label: "Default" },
@@ -133,6 +139,11 @@ export const ratePlansConfig: ScreenConfig = {
     { field: "code", label: "Code", type: "data", required: true },
     { field: "modifier_type", label: "Modifier type", type: "select", options: ["Percent", "Amount", "Absolute"] },
     { field: "modifier_value", label: "Modifier value (-10 = 10% off)", type: "float" },
+    { field: "billing_basis", label: "Day-use billing", type: "select", options: ["Nightly", "Hourly", "Block"], hint: "Hourly and Block price same-day stays from the planned times; Nightly keeps one full room night." },
+    { field: "hourly_rate", label: "Hourly rate", type: "currency" },
+    { field: "min_hours", label: "Minimum hours", type: "float" },
+    { field: "block_hours", label: "Block hours", type: "float" },
+    { field: "block_rate", label: "Block rate", type: "currency" },
     { field: "cancellation_policy", label: "Cancellation policy", type: "data" },
     { field: "is_default", label: "Default plan", type: "check" },
     { field: "disabled", label: "Disabled (unpublished)", type: "check", hint: "Tick to unpublish; clear to activate at booking" },
@@ -175,6 +186,39 @@ export const seasonsConfig: ScreenConfig = {
   ],
 }
 
+export const rateRestrictionsConfig: ScreenConfig = {
+  doctype: "Rate Restriction",
+  title: "Stay restrictions",
+  description:
+    "Minimum and maximum nights, closed to arrival, closed to departure and stop-sell, per rate plan, room type and dates. Quotes refuse a stay that breaks one, and they go to the channel manager with your rates. Overlapping rules take the strictest.",
+  propertyScoped: true,
+  orderBy: "start_date asc",
+  columns: [
+    { field: "restriction_name", label: "Name" },
+    { field: "rate_plan", label: "Rate plan" },
+    { field: "room_type", label: "Room type" },
+    { field: "start_date", label: "From" },
+    { field: "end_date", label: "To" },
+    { field: "days_of_week", label: "Days" },
+    { field: "min_nights", label: "Min" },
+    { field: "max_nights", label: "Max" },
+    { field: "disabled", label: "Status", statusCheck: true },
+  ],
+  form: [
+    { field: "restriction_name", label: "Name", type: "data", required: true },
+    { field: "rate_plan", label: "Rate plan (blank = all)", type: "link", linkDoctype: "Rate Plan" },
+    { field: "room_type", label: "Room type (blank = all)", type: "link", linkDoctype: "Room Type" },
+    { field: "start_date", label: "Start date", type: "date", required: true },
+    { field: "end_date", label: "End date (inclusive)", type: "date", required: true },
+    { field: "days_of_week", label: "Days of week (e.g. fri, sat)", type: "data", hint: "Blank = every day. Add another restriction for other days" },
+    { field: "min_nights", label: "Minimum nights", type: "int", hint: "Shortest stay arriving on these dates. 0 = no minimum" },
+    { field: "max_nights", label: "Maximum nights", type: "int", hint: "Longest stay arriving on these dates. 0 = no maximum" },
+    { field: "closed_to_arrival", label: "Closed to arrival", type: "check", hint: "No stay may start on these dates" },
+    { field: "closed_to_departure", label: "Closed to departure", type: "check", hint: "No stay may end on these dates" },
+    { field: "stop_sell", label: "Stop-sell", type: "check", hint: "No stay may include a night on these dates" },
+    { field: "disabled", label: "Disabled", type: "check", hint: "Tick to deactivate; clear to activate" },
+  ],
+}
 export const holidayPackagesConfig: ScreenConfig = {
   doctype: "Holiday Package",
   title: "Packages",
@@ -742,7 +786,7 @@ export const outletsConfig: ScreenConfig = {
   ],
   form: [
     { field: "outlet_name", label: "Outlet name", type: "data", required: true },
-    { field: "outlet_type", label: "Type", type: "select", options: ["Restaurant", "Room Service", "Bar", "Spa", "Other"] },
+    { field: "outlet_type", label: "Type", type: "select", options: ["Restaurant", "Room Service", "Bar", "Spa", "Shop", "Other"] },
     { field: "gst_rate", label: "Tax %", type: "float" },
     { field: "disabled", label: "Disabled", type: "check" },
     {
@@ -874,7 +918,7 @@ export const channelManagerConfig: ScreenConfig = {
   doctype: "Channel Manager Connection",
   title: "Channel Manager",
   description:
-    "Two-way OTA sync through a channel manager. Bring your own Channex.io account (self-serve, covers Booking.com / Agoda / Expedia / Airbnb); STAAH and AioSell adapters activate with their partner credentials. Map your room types under OTA Room Mappings, then availability and rates push automatically every hour and after every booking - and their bookings land as reservations here.",
+    "Two-way OTA sync through a channel manager. Bring your own Channex.io account (self-serve, covers Booking.com / Agoda / Expedia / Airbnb); STAAH and AioSell adapters activate with their partner credentials. Map your room types under OTA Room Mappings (or import them from the connection), then every change to availability, rates and restrictions goes out on its own within a minute - and their bookings land as reservations here.",
   searchFields: ["provider", "external_property_id"],
   filters: [
     { field: "provider", label: "Provider", options: ["Channex", "STAAH", "AioSell", "Custom"] },
@@ -892,13 +936,16 @@ export const channelManagerConfig: ScreenConfig = {
   ],
   form: [
     { field: "provider", label: "Provider", type: "select", options: ["Channex", "STAAH", "AioSell", "Custom"], required: true },
-    { field: "api_key", label: "API key / token", type: "data", hint: "Stored encrypted. Channex: your user API key; STAAH/AioSell: from partner onboarding" },
+    { field: "api_key", label: "API key / token", type: "password", hint: "Stored encrypted. Channex: your user API key; STAAH/AioSell: from partner onboarding" },
     { field: "external_property_id", label: "Provider's property ID", type: "data", required: true },
     { field: "endpoint", label: "API endpoint override", type: "data", hint: "Leave blank for the provider default" },
-    { field: "webhook_secret", label: "Webhook secret", type: "data", hint: "Set the same value on the provider's booking webhook" },
+    { field: "webhook_secret", label: "Webhook secret", type: "password", hint: "Set the same value on the provider's booking webhook" },
     { field: "sync_days", label: "Days to push", type: "int" },
+    { field: "ari_calls_per_minute", label: "ARI calls per minute", type: "int", hint: "Per endpoint (availability and restrictions count apart). Channex allows 10." },
+    { field: "ari_batch_seconds", label: "Rate batch window (seconds)", type: "int", hint: "Rate changes made within this window go out together in one call." },
     { field: "active", label: "Active", type: "check" },
   ],
+  extra: ChannelConnectionActions,
 }
 
 export const channelRoomMappingsConfig: ScreenConfig = {
@@ -914,12 +961,14 @@ export const channelRoomMappingsConfig: ScreenConfig = {
     { field: "room_type", label: "Room Type" },
     { field: "external_room_id", label: "Provider room ID" },
     { field: "external_rate_id", label: "Provider rate ID" },
+    { field: "rate_plan", label: "Rate plan" },
   ],
   form: [
     { field: "connection", label: "Connection", type: "link", linkDoctype: "Channel Manager Connection", linkPropertyScoped: true, required: true },
     { field: "room_type", label: "Room type", type: "link", linkDoctype: "Room Type", linkPropertyScoped: true, required: true },
     { field: "external_room_id", label: "Provider room ID", type: "data", required: true },
     { field: "external_rate_id", label: "Provider rate plan ID", type: "data" },
+    { field: "rate_plan", label: "Rate plan", type: "link", linkDoctype: "Rate Plan", linkPropertyScoped: true, hint: "Empty: the room type's base price" },
   ],
 }
 
@@ -974,6 +1023,7 @@ export const transactionCodesConfig: ScreenConfig = {
     { field: "description", label: "Description" },
     { field: "txn_type", label: "Type", badge: true },
     { field: "revenue_group", label: "Group" },
+    { field: "gl_code", label: "GL code" },
     { field: "default_tax_rate", label: "Tax %" },
     { field: "disabled", label: "Status", statusCheck: true },
   ],
@@ -987,6 +1037,10 @@ export const transactionCodesConfig: ScreenConfig = {
       options: ["Revenue", "Payment", "Tax", "Package", "Adjustment"] },
     { field: "revenue_group", label: "Revenue group", type: "data",
       hint: "e.g. Rooms, F&B, Other - used on ledgers and exports." },
+    { field: "gl_code", label: "GL code", type: "data",
+      hint: "Your accounts' ledger code. Each line keeps the GL code it was posted with." },
+    { field: "payment_mode", label: "Payment mode", type: "data",
+      hint: "Payment codes only: a payment mode such as Cash, Card or Bank Transfer. Payments in that mode book to this code." },
     { field: "subgroup", label: "Subgroup", type: "data" },
     { field: "default_tax_rate", label: "Default tax %", type: "float" },
     { field: "is_alcohol", label: "Alcohol", type: "check", dependsOn: sellsAlcohol,

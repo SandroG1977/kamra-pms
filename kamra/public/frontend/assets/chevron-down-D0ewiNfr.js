@@ -1,6 +1,10 @@
+<<<<<<<< HEAD:kamra/public/frontend/assets/chevron-down-D0ewiNfr.js
 import{b as o}from"./index-1umbYUla.js";/**
+========
+import{o}from"./index-DUcwpva4.js";/**
+>>>>>>>> v2.8.1:kamra/public/frontend/assets/chevron-left-CTzp66Ds.js
  * @license lucide-react v0.525.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
- */const n=[["path",{d:"m6 9 6 6 6-6",key:"qrunsl"}]],c=o("chevron-down",n);export{c as C};
+ */const e=[["path",{d:"m15 18-6-6 6-6",key:"1wnfg3"}]],c=o("chevron-left",e);export{c as C};

@@ -5,7 +5,7 @@ import { call, getCurrentProperty } from "../lib/api"
 import { Button } from "../components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { cur, moneyLocale } from "../lib/money"
-import { useT, t as translate } from "../lib/i18n"
+import { useT, serverLang, t as translate } from "../lib/i18n"
 import { useAuth } from "../lib/auth"
 
 const VOID_REPORT_ROLES = ["Finance", "Hotel Admin", "System Manager", "Administrator"]
@@ -73,11 +73,15 @@ interface RunPayload {
 interface Day {
   date: string
   rooms_sold: number
+  rooms_occupied: number
+  available_rooms: number
+  occupancy_basis: "in_house" | "posted"
   pax: number
   occupancy_pct: number
   room_revenue: number
   fnb_revenue: number
   other_revenue: number
+  allowances: number
   total_revenue: number
   adr: number
   revpar: number
@@ -311,7 +315,7 @@ export default function Reports({ initialTab = "saved" }: { initialTab?: Tab }) 
           filters: JSON.stringify(drill ? [...active, { ...drill, op: "=" }] : active),
           group_by: JSON.stringify(groupBy && !drill ? [groupBy] : []),
           format,
-          lang: language,
+          lang: serverLang(language),
         },
       )
       if (title.trim()) res.title = title.trim()
@@ -345,7 +349,7 @@ export default function Reports({ initialTab = "saved" }: { initialTab?: Tab }) 
     try {
       const res = await call<{ content: string }>(
         name ? "kamra.custom_reports.run_custom_report" : "kamra.custom_reports.run_report_pack",
-        { property, pack, name, from_date: fromDate, to_date: toDate, format: "html", lang: language },
+        { property, pack, name, from_date: fromDate, to_date: toDate, format: "html", lang: serverLang(language) },
       )
       const w = window.open("", "_blank")
       if (w) {
@@ -367,7 +371,7 @@ export default function Reports({ initialTab = "saved" }: { initialTab?: Tab }) 
     try {
       await call("kamra.custom_reports.email_custom_report", {
         property, recipients: to, dataset: pack.id,
-        from_date: fromDate, to_date: toDate, lang: language,
+        from_date: fromDate, to_date: toDate, lang: serverLang(language),
       })
       window.alert(t("Report emailed."))
     } catch (e) {
@@ -387,7 +391,7 @@ export default function Reports({ initialTab = "saved" }: { initialTab?: Tab }) 
         property, title: translate(pack.label), dataset: pack.id, is_shared: 1,
         schedule_frequency: "Weekly", schedule_weekday: "Mon", schedule_time: "07:00",
         recipients: to,
-        lang: language,
+        lang: serverLang(language),
       })
       await reload()
       setTab("saved")
@@ -416,7 +420,7 @@ export default function Reports({ initialTab = "saved" }: { initialTab?: Tab }) 
         schedule_time: scheduleTime,
         schedule_weekday: scheduleWeekday,
         recipients,
-        lang: language,
+        lang: serverLang(language),
       })
       setEditName(savedDef.name)
       await reload()
@@ -459,7 +463,7 @@ export default function Reports({ initialTab = "saved" }: { initialTab?: Tab }) 
           ? undefined
           : JSON.stringify(filters.filter((f) => f.field && f.value !== "")),
         group_by: name || editName ? undefined : JSON.stringify(groupBy ? [groupBy] : []),
-        lang: language,
+        lang: serverLang(language),
         attach_format: "csv",
       })
       await reload()
@@ -878,6 +882,7 @@ export default function Reports({ initialTab = "saved" }: { initialTab?: Tab }) 
                     <option value="Off">{t("Off")}</option>
                     <option value="Daily">{t("Daily")}</option>
                     <option value="Weekly">{t("Weekly")}</option>
+                    <option value="Monthly">{t("Monthly")}</option>
                     <option value="After night audit">{t("After night audit")}</option>
                   </select>
                   {scheduleFrequency !== "Off" && (
@@ -1061,10 +1066,12 @@ function FlashPanel(props: {
         <Stat
           label={t("Occupancy")}
           value={`${todayData?.occupancy_pct ?? 0}%`}
-          sub={t("{sold} of {total} rooms", {
-            sold: todayData?.rooms_sold ?? 0,
-            total: d.total_rooms,
-          })}
+          sub={t(
+            todayData?.occupancy_basis === "in_house"
+              ? "{occupied} of {available} rooms (in house)"
+              : "{occupied} of {available} rooms (posted)",
+            { occupied: todayData?.rooms_occupied ?? 0, available: todayData?.available_rooms ?? 0 },
+          )}
         />
         <Stat label={t("ADR")} value={`${cur()}${inr(todayData?.adr ?? 0)}`} sub={t("room rate / room sold")} />
         <Stat label={t("RevPAR")} value={`${cur()}${inr(todayData?.revpar ?? 0)}`} sub={t("room rev / room")} />
@@ -1076,10 +1083,11 @@ function FlashPanel(props: {
         <Stat
           label={ranged ? t("Revenue") : t("Revenue (day)")}
           value={`${cur()}${inr(todayData?.total_revenue ?? 0)}`}
-          sub={t("room {room} · F&B {fnb} · other {other}", {
+          sub={t("room {room} · F&B {fnb} · other {other} · allowances {allowances}", {
             room: `${cur()}${inr(todayData?.room_revenue ?? 0)}`,
             fnb: `${cur()}${inr(todayData?.fnb_revenue ?? 0)}`,
             other: `${cur()}${inr(todayData?.other_revenue ?? 0)}`,
+            allowances: `${cur()}${inr(todayData?.allowances ?? 0)}`,
           })}
         />
       </div>
@@ -1107,7 +1115,7 @@ function FlashPanel(props: {
                     <td className="py-1.5 pr-3 text-right">{inr(r.adr)}</td>
                     <td className="py-1.5 pr-3 text-right">{inr(r.revpar)}</td>
                     <td className="py-1.5 text-right">
-                      {inr(r.room_revenue + r.fnb_revenue + r.other_revenue)}
+                      {inr(r.total_revenue)}
                     </td>
                   </tr>
                 ))}

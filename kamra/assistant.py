@@ -9,10 +9,11 @@ Agent Action Log. If the model is wrong, the tools refuse.
 
 import json
 import os
+import re
 
 import frappe
 import requests
-from frappe.utils import cint, nowdate
+from frappe.utils import add_days, cint, getdate, nowdate
 
 try:
 	from langsmith import traceable, get_current_run_tree
@@ -196,8 +197,9 @@ EXTRA_TOOLS = {
 		False, True),
 	"void_charge": (
 		"void_folio_charge",
-		"Remove a WRONG charge line from an open folio (duplicate, wrong "
-		"amount, wrong guest). Pass the folio and the charge line's id (the "
+		"Void a WRONG charge line on an open folio (duplicate, wrong amount, "
+		"wrong guest): the line stays and a reversal line with the reason "
+		"follows it. Pass the folio and the charge line's id (the "
 		"`name` field of the charge row from get_folio). For a settled/invoiced "
 		"folio use apply_allowance instead.",
 		{"folio": {"type": "string"}, "charge_row": {"type": "string"},
@@ -283,8 +285,10 @@ EXTRA_TOOLS = {
 		"open tills, open restaurant bills, departures still in house, arrivals "
 		"and what the no-show policy will do, rate variances, outlet bills on "
 		"rooms, high balances, companies over credit limit, room status "
-		"discrepancies. Each check has a severity (block | warn | info), a "
-		"count, the rows and a suggested action. Run it before run_night_audit.",
+		"discrepancies. Only checks under `blocking` stop the audit. `warnings` "
+		"are worth a look but do not stop it, and `clear` lists checks with "
+		"nothing to do. If `blocking` is empty, say the audit can run. Run it "
+		"before run_night_audit.",
 		{}, True, False),
 	"run_night_audit": (
 		"run_night_audit",
@@ -389,11 +393,24 @@ EXTRA_TOOLS = {
 		 "to_date": {"type": "string"}}, True, True),
 }
 
+# hours, not nights: a pool, a day room or any stay that ends the same day
+DAY_USE_PARAMS = {
+	"check_in_time": {
+		"type": "string",
+		"description": "HH:MM. For a booking by the hour (pool, day room, "
+		"any room on an hourly rate): set check_out_date to check_in_date "
+		"and give both times. Never price or book hours as a night."},
+	"check_out_time": {"type": "string", "description": "HH:MM, see check_in_time."},
+}
+
 TOOLS = {
 	**EXTRA_TOOLS,
 	"front_desk_today": (
 		"front_desk_snapshot",
-		"Today's arrivals, departures, in-house guests (with paid/due) and room board.",
+		"Today's board. `arrivals` are still to come, not in the hotel yet; "
+		"`in_house` are staying now; `departures` leave today. balance_due is "
+		"what a guest owes, and `credit` is what they have overpaid. A guest "
+		"with balance_due 0 owes nothing.",
 		{}, True, False),
 	"availability": (
 		"availability_calendar",
@@ -409,7 +426,7 @@ TOOLS = {
 		 "check_out_date": {"type": "string"}, "adults": {"type": "integer"},
 		 "children": {"type": "integer"}, "meal_plan": MEAL_PLAN_PARAM,
 		 "rate_plan": RATE_PLAN_PARAM,
-		 "voucher_code": {"type": "string"}}, True, False),
+		 "voucher_code": {"type": "string"}, **DAY_USE_PARAMS}, True, False),
 	"booking_options": (
 		"booking_options",
 		"Room types catalog, meal plans, companies, travel agents, experiences, sell message and policies. Do not use its base_price to quote stays; call `quote` for actual pricing with occupancy and taxes.",
@@ -428,7 +445,7 @@ TOOLS = {
 		 "rate_plan": RATE_PLAN_PARAM,
 		 "company": {"type": "string"},
 		 "booked_by_name": {"type": "string"},
-		 "booked_by_phone": {"type": "string"}}, True, True),
+		 "booked_by_phone": {"type": "string"}, **DAY_USE_PARAMS}, True, True),
 	"find_reservations": (
 		"find_reservations",
 		"Find reservations by guest name, room number, or reference - optionally "
@@ -550,6 +567,32 @@ TOOLS = {
 		{"folio": {"type": "string"}, "reservation": {"type": "string"},
 		 "mode": {"type": "string"},
 		 "amount": {"type": "number"}, "reference": {"type": "string"}}, False, True),
+	"record_advance": (
+		"record_advance",
+		"Record an advance a guest paid BEFORE arrival (bank transfer, cash, "
+		"card) on a booking that is not checked in yet. A booking on hold "
+		"becomes Confirmed. A Bank Transfer needs its transfer number as "
+		"reference: ask staff for it first. Use record_payment once the guest "
+		"is in house.",
+		{"reservation": {"type": "string"}, "amount": {"type": "number"},
+		 "mode": {"type": "string"}, "reference": {"type": "string"}},
+		False, True),
+	"petty_cash_report": (
+		"cashier.petty_cash_report",
+		"Expenses paid in cash from the till (petty cash vouchers), with "
+		"today's and this month's totals.",
+		{"limit": {"type": "integer"}}, True, False),
+	"supplier_bills": (
+		"payables.vendor_bills",
+		"Purchases: supplier bills, most urgent first. status is \"open\" "
+		"(default, not yet paid), \"all\", or one status.",
+		{"status": {"type": "string"}, "vendor": {"type": "string"},
+		 "limit": {"type": "integer"}}, True, False),
+	"outlet_menu": (
+		"pos.pos_menu",
+		"What an outlet sells and the prices: restaurant, bar, shop or any "
+		"other outlet. Get the outlet id from `outlets` first.",
+		{"outlet": {"type": "string"}}, False, False),
 	"cancellation_preview": (
 		"cancellation_preview",
 		"What cancelling would cost right now. Always run before cancelling.",
@@ -687,6 +730,11 @@ REPLY_LANGS = {
 	"hi-IN": "Hindi", "ta-IN": "Tamil", "kn-IN": "Kannada", "te-IN": "Telugu",
 	"ml-IN": "Malayalam", "ar-SA": "Arabic", "es-ES": "Spanish",
 	"pt-BR": "Brazilian Portuguese",
+	# the UI says zh-CN, Frappe's catalogue says zh: accept both from clients
+	"zh-CN": "Simplified Chinese", "zh": "Simplified Chinese",
+	"fil-PH": "Filipino",
+	"vi-VN": "Vietnamese", "vi": "Vietnamese",
+	"sw-TZ": "Swahili",
 }
 
 
@@ -712,6 +760,10 @@ def _system_prompt(property: str, settings, lang: str | None = None) -> str:
 	symbol = (frappe.db.get_value("Currency", currency, "symbol") or "").strip() if currency else ""
 	inclusive = bool(prop.get("rates_include_tax"))
 	tax_mode = "rates include taxes" if inclusive else "rates exclude taxes"
+	if prop.get("rates_include_levy") and float(prop.get("room_levy_percent") or 0) > 0:
+		tax_mode += ", and the displayed rates already include the room levy"
+	today = getdate(nowdate())
+	week = ", ".join(f"{d:%A} {d}" for d in (add_days(today, i) for i in range(1, 8)))
 
 	ch = ""
 	try:
@@ -723,7 +775,7 @@ def _system_prompt(property: str, settings, lang: str | None = None) -> str:
 		ch = ""
 
 	base = SYSTEM_BASE.format(
-		property_name=prop.property_name or property, today=nowdate(),
+		property_name=prop.property_name or property, today=f"{today:%A} {today}", week=week,
 		currency=currency or "unspecified",
 		currency_label=symbol or currency or "unspecified",
 		tax_mode=tax_mode,
@@ -974,6 +1026,24 @@ def _tool_defs():
 	  if _tool_allowed(name)]
 
 
+EMPTY_REPLY = ("The AI provider sent back an empty answer. Please ask again, "
+               "or say it in fewer words.")
+
+
+def _retry_text(base: str, headers: dict, model: str, convo: list) -> str:
+	"""One more try when the model answers with nothing (some providers do
+	after a long tool round). Touches no DB, so the stream can call it."""
+	try:
+		r = _post_chat(base, headers, chat_payload(model, convo, temperature=0.2))
+		if r.status_code == 200:
+			text = (r.json()["choices"][0]["message"].get("content") or "").strip()
+			if text:
+				return text
+	except Exception:  # a failed retry falls back to the notice
+		pass
+	return EMPTY_REPLY
+
+
 def _post_chat(base: str, headers: dict, body: dict, *, stream: bool = False):
 	"""POST /chat/completions, retrying once if the model rejects the payload.
 
@@ -1120,6 +1190,56 @@ def _missing_refs(text: str) -> str:
 	return f"\n\nRef: {', '.join(missing)}" if missing else ""
 
 
+def _audit_for_agent(result: dict) -> dict:
+	"""Sort the checklist so a clear or warn-only check can't be read as a blocker."""
+	checks = result.pop("checks")
+	blockers = set(result["blockers"])
+	return {
+		**result,
+		"blocking": [c for c in checks if c["key"] in blockers],
+		"warnings": [c for c in checks if c["count"] and c["key"] not in blockers],
+		"clear": [c["title"] for c in checks if not c["count"]],
+	}
+
+
+def _desk_for_agent(result: dict) -> dict:
+	"""An overpaid stay shows as a credit, so a negative due can't be read as owing."""
+	for key in ("arrivals", "departures", "in_house"):
+		for row in result[key]:
+			if row["balance_due"] < 0:
+				row["credit"] = -row["balance_due"]
+				row["balance_due"] = 0
+	return result
+
+
+# money keys the model reads; rates and percents are not amounts to restate
+_MONEY_KEY = re.compile(r"(amount|total|balance|due|credit|paid|deposit|price|outstanding|charges?)$")
+
+
+def _with_money_text(data, property: str, currency: str):
+	"""Adds `<key>_text` beside each money field, as the screen shows it, so
+	the reply copies it instead of writing 2940.0 or its own number style."""
+	if isinstance(data, list):
+		return [_with_money_text(v, property, currency) for v in data]
+	if not isinstance(data, dict):
+		return data
+	from kamra.localization import money_text
+
+	# a row in another currency (an FX payment) keeps its raw amounts
+	foreign = data.get("currency") not in (None, "", currency)
+	out = {}
+	for k, v in data.items():
+		out[k] = _with_money_text(v, property, currency)
+		# money is a float; an int "total" or "overdue" is a count of rows
+		if not foreign and isinstance(v, float) and _MONEY_KEY.search(k):
+			out[f"{k}_text"] = money_text(property, v)
+	return out
+
+
+# what the model sees of a tool's result; the endpoint's own output is unchanged
+_AGENT_VIEW = {"night_audit_precheck": _audit_for_agent, "front_desk_today": _desk_for_agent}
+
+
 @traceable(run_type="tool")
 def _run_tool(name: str, args: dict, property: str):
 	try:
@@ -1140,6 +1260,10 @@ def _run_tool(name: str, args: dict, property: str):
 	_assert_this_property(clean, property)
 	if name == "record_payment":
 		clean = _payment_folio(clean)
+	if (name == "record_advance" and clean.get("mode") == "Bank Transfer"
+	        and not clean.get("reference")):
+		frappe.throw("Ask staff for the bank transfer number, then call "
+		             "record_advance again with it as reference.")
 	if name == "create_booking":
 		# A model-made key reads as "a second identical room on purpose" and
 		# switches the duplicate guard off, so the chat never passes one. The
@@ -1175,7 +1299,9 @@ def _run_tool(name: str, args: dict, property: str):
 	_note_refs(clean, result)
 	if name == "quote":
 		_note_quote(clean, result)
-	return json.loads(frappe.as_json(result))
+	result = json.loads(frappe.as_json(result))
+	result = _AGENT_VIEW[name](result) if name in _AGENT_VIEW else result
+	return _with_money_text(result, property, frappe.get_cached_value("Property", property, "currency"))
 
 
 def _tool_json_for_provider(result, settings):
@@ -1313,6 +1439,8 @@ def ask(property: str, messages, lang: str | None = None):
 		calls = msg.get("tool_calls") or []
 		if not calls:
 			reply = msg.get("content") or ""
+			if not reply.strip():
+				reply = _retry_text(base, headers, model, convo[:-1])
 			return {"reply": reply + _missing_refs(reply), "actions": actions,
 			        "cards": _turn_cards()}
 
@@ -1395,6 +1523,7 @@ def ask_stream(property: str, messages, lang: str | None = None):
 
 	# --- resolve tools synchronously (DB access happens here, before streaming)
 	actions = []
+	first_text = ""
 	frappe.local.kamra_chat_bookings = {}
 	frappe.local.kamra_chat_refs = []
 	frappe.local.kamra_chat_quote = None
@@ -1408,10 +1537,17 @@ def ask_stream(property: str, messages, lang: str | None = None):
 			if any(m in err_str for m in ("insufficient_quota", "billing", "credit")):
 				return Response(_sse("error", _no_credit()) + _sse("done", {}),
 				                mimetype="text/event-stream")
-			frappe.throw(f"AI provider error ({llm_res.get('status_code')}): {str(llm_res.get('error', ''))[:200]}")
+			return Response(
+				_sse("error", {"message": f"AI provider error ({llm_res.get('status_code')}): {str(llm_res.get('error', ''))[:200]}",
+				               "code": "provider_error",
+				               "status": llm_res.get("status_code", 500)})
+				+ _sse("done", {}),
+				mimetype="text/event-stream")
 		msg = llm_res["choices"][0]["message"]
 		calls = msg.get("tool_calls") or []
 		if not calls:
+			# kept in case the streamed answer comes back empty
+			first_text = msg.get("content") or ""
 			break  # data gathered; regenerate the answer streamed (no tools)
 		convo.append(msg)
 		for call in calls:
@@ -1463,6 +1599,9 @@ def ask_stream(property: str, messages, lang: str | None = None):
 						streamed.append(delta["content"])
 						yield sse("token", {"text": delta["content"]})
 				text = "".join(streamed)
+				if not text.strip():
+					text = first_text.strip() or _retry_text(base, headers, model, convo)
+					yield sse("token", {"text": text})
 				missing = [r for r in refs if r not in text][:3]
 				if missing:
 					yield sse("token", {"text": f"\n\nRef: {', '.join(missing)}"})

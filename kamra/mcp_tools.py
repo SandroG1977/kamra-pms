@@ -156,7 +156,8 @@ TOOLS: tuple[ToolSpec, ...] = (
 		"""Price a stay (deterministic: occupancy pricing, seasons, meal plan,
 		voucher, GST). Use before every booking. Room type, meal plan and rate
 		plan accept the id, code or exact name; an unknown or ambiguous value
-		is refused with the valid options.""",
+		is refused with the valid options. For a same-day stay on an hourly or
+		block rate plan, pass check_in_time / check_out_time (HH:MM).""",
 		{
 			"room_type": ROOM_TYPE_PARAM,
 			"check_in_date": _p("string"),
@@ -167,6 +168,8 @@ TOOLS: tuple[ToolSpec, ...] = (
 			"rate_plan": RATE_PLAN_PARAM,
 			"voucher_code": _p("string"),
 			"company": COMPANY_PARAM,
+			"check_in_time": _p("string"),
+			"check_out_time": _p("string"),
 		},
 		required=("room_type", "check_in_date", "check_out_date"),
 		property=True,
@@ -186,7 +189,9 @@ TOOLS: tuple[ToolSpec, ...] = (
 		free room, applies the voucher, prices via the engine. Room type,
 		meal plan and rate plan accept the id, code or exact name. Safe to
 		retry: a repeated call returns the existing booking (see
-		idempotency_key) - check idempotent_replay in the result.""",
+		idempotency_key) - check idempotent_replay in the result. Same-day
+		dates are day-use; optional check_in_time / check_out_time (HH:MM)
+		set the slot and price an hourly or block rate plan.""",
 		{
 			"guest_name": _p("string"),
 			"room_type": ROOM_TYPE_PARAM,
@@ -202,6 +207,8 @@ TOOLS: tuple[ToolSpec, ...] = (
 			"market_segment": _p("string", enum=[
 				"Corporate", "Leisure", "Group", "MICE", "Government", "Wedding",
 				"Long Stay", "Airline Crew", "Complimentary", "House Use"]),
+			"check_in_time": _p("string"),
+			"check_out_time": _p("string"),
 			"idempotency_key": IDEMPOTENCY_KEY_PARAM,
 		},
 		required=("guest_name", "room_type", "check_in_date", "check_out_date"),
@@ -888,9 +895,11 @@ TOOLS: tuple[ToolSpec, ...] = (
 	_t(
 		"void_charge",
 		"api.void_folio_charge",
-		"""Remove a WRONG charge line from an open folio (duplicate, wrong
-		amount, wrong guest). Pass the folio and the charge line's id (`name`
-		from get_folio). For settled/invoiced bills use apply_allowance.""",
+		"""Void a WRONG charge line on an open folio (duplicate, wrong
+		amount, wrong guest): the line stays and a reversal line of the
+		opposite sign, with the reason, follows it. Pass the folio and the
+		charge line's id (`name` from get_folio). For settled/invoiced bills
+		use apply_allowance.""",
 		{
 			"folio": _p("string"),
 			"charge_row": _p("string"),
@@ -992,11 +1001,119 @@ TOOLS: tuple[ToolSpec, ...] = (
 		group="Billing",
 	),
 	_t(
+		"refund_payment",
+		"api.refund_folio_payment",
+		"""Give money back on an open folio, with a reason (or a Refund
+		reason_code). payment_row (a payment line from get_folio) refunds
+		that payment: to its own mode by default, or pass mode Cash to give
+		cash back; amount defaults to what is left of it. Without
+		payment_row give amount and mode. Refuses more than the guest is in
+		credit. A security deposit is refunded with refund_deposit. Confirm
+		the amount with staff first.""",
+		{
+			"folio": _p("string"),
+			"payment_row": _p("string"),
+			"amount": _p("number"),
+			"mode": _p("string"),
+			"reason": _p("string"),
+			"reason_code": _p("string", description="Optional Refund reason code"),
+			"idempotency_key": IDEMPOTENCY_KEY_PARAM,
+		},
+		required=("folio",),
+		mutating=True,
+		group="Billing",
+	),
+	_t(
+		"correct_folio_charge",
+		"api.correct_folio_charge",
+		"""Correct a posted charge on an open folio: the original line stays,
+		a reversal of it and a repost with the right amount (pre-tax),
+		tax rate, charge type or description are added, both linked to it
+		(corrects_row). Give only what changes. Needs a reason (or a Void
+		reason_code). Room nights change through the stay's rate, not here;
+		settled bills need a credit note.""",
+		{
+			"folio": _p("string"),
+			"charge_row": _p("string"),
+			"reason": _p("string"),
+			"amount": _p("number"),
+			"gst_rate": _p("number"),
+			"charge_type": _p("string"),
+			"description": _p("string"),
+			"reason_code": _p("string", description="Optional Void reason code"),
+			"idempotency_key": IDEMPOTENCY_KEY_PARAM,
+		},
+		required=("folio", "charge_row"),
+		mutating=True,
+		group="Billing",
+	),
+	_t(
+		"folio_statement",
+		"api.folio_invoice",
+		"""One folio by its id, as the bill prints: lines with date, charge
+		type, transaction code, GL code, tax and corrects_row; payments with
+		mode, kind, GL code and refund_of; a dated statement with charges,
+		credits and running balance; tax summary; company payments that
+		cleared it (allocations). Read-only.""",
+		{"folio": _p("string")},
+		required=("folio",),
+		group="Billing",
+	),
+	_t(
+		"transfer_folio_charge",
+		"api.transfer_folio_charges",
+		"""Move charge lines (names from get_folio or folio_statement) off an
+		open folio, ledger and all. Give ONE target: to_folio (another folio
+		of the same stay or group), to_company=true (the stay's Company
+		folio, opened if needed; alcohol never moves there) or
+		to_reservation (another checked-in stay here: Finance or Hotel Admin
+		only, reason required). Lines keep their GL code.""",
+		{
+			"from_folio": _p("string"),
+			"charge_rows": _p("array", items=_p("string")),
+			"to_folio": _p("string"),
+			"to_company": _p("boolean"),
+			"to_reservation": _p("string"),
+			"reason": _p("string"),
+			"idempotency_key": IDEMPOTENCY_KEY_PARAM,
+		},
+		required=("from_folio", "charge_rows"),
+		mutating=True,
+		bools=("to_company",),
+		group="Billing",
+	),
+	_t(
+		"list_cashier_sessions",
+		"cashier.list_sessions",
+		"""Till sessions, newest first, for a business date (or
+		business_date to to_date), optionally status Open or Closed: cashier,
+		terminal, system totals per method, expected, counted, variance and
+		its review. Read-only.""",
+		{"business_date": _p("string", format="date"),
+		 "to_date": _p("string", format="date"),
+		 "status": _p("string", enum=["Open", "Closed"]),
+		 "limit": _p("integer")},
+		property=True,
+		group="Billing",
+	),
+	_t(
+		"cashier_session_detail",
+		"cashier.session_report",
+		"""One till session for a reconciliation: system vs counted per
+		method, the note-by-note cash count, every receipt and paid-out in
+		time order, the cashier and the supervisor who approved a variance.
+		Read-only.""",
+		{"session": _p("string")},
+		required=("session",),
+		group="Billing",
+	),
+	_t(
 		"close_folio",
 		"api.close_folio",
-		"""Close / settle an open folio and issue the invoice number. Balance
-		must be zero (or use part-settle elsewhere). Confirm with staff  - 
-		irreversible.""",
+		"""Close a settled folio and issue the invoice number. Balance must be
+		zero. Refuses the Guest folio of a stay that is still checked in: use
+		part_settle_folio (Settle & continue stay) so tonight's charges still
+		have an open bill. Confirm with staff. Irreversible.""",
 		{"folio": _p("string")},
 		required=("folio",),
 		mutating=True,
@@ -1035,6 +1152,18 @@ TOOLS: tuple[ToolSpec, ...] = (
 		required=("room_type", "start_date", "end_date", "rate"),
 		property=True,
 		mutating=True,
+		group="Revenue",
+	),
+	_t(
+		"occupancy_on_books",
+		"api.occupancy_on_books",
+		"""Occupancy on the books per night for a date range (both dates
+		included, at most 90 nights): confirmed and in-house reservations
+		over all rooms. Rooms already sold, not a forecast. Quote the
+		figures as returned - never estimate or round them yourself.""",
+		{"start_date": _p("string"), "end_date": _p("string")},
+		required=("start_date",),
+		property=True,
 		group="Revenue",
 	),
 	_t(
@@ -1192,6 +1321,78 @@ TOOLS: tuple[ToolSpec, ...] = (
 		group="Billing",
 	),
 	_t(
+		"create_ar_account",
+		"receivables.save_ar_account",
+		"""Open a company account (AR) at this property, so the company can
+		be billed on credit at check-out. `company` is the Corporate Account
+		id. Payment terms: the property default unless
+		use_default_credit_days is false, then credit_days. credit_limit 0
+		means no limit. A restricted account needs restricted_reason and
+		takes no new bills. One account per company per property. Needs a
+		Finance or Hotel Admin user.""",
+		{"company": _p("string"),
+		 "account_number": _p("string"),
+		 "credit_limit": _p("number"),
+		 "use_default_credit_days": _p("boolean"),
+		 "credit_days": _p("integer"),
+		 "billing_address": _p("string"),
+		 "restricted": _p("boolean"),
+		 "restricted_reason": _p("string"),
+		 "idempotency_key": _p("string", description="Optional unique key for "
+		                       "this account. Retrying with the same key returns "
+		                       "the account it opened (idempotent_replay).")},
+		required=("company",),
+		property=True,
+		mutating=True,
+		bools=("use_default_credit_days", "restricted"),
+		group="Billing",
+	),
+	_t(
+		"update_ar_account",
+		"receivables.save_ar_account",
+		"""Edit a company account (see ar_accounts): account number, credit
+		limit, payment terms, billing address, or restrict it (with
+		restricted_reason) and lift the restriction. Only the fields you pass
+		change. Needs a Finance or Hotel Admin user.""",
+		{"account": _p("string"),
+		 "account_number": _p("string"),
+		 "credit_limit": _p("number"),
+		 "use_default_credit_days": _p("boolean"),
+		 "credit_days": _p("integer"),
+		 "billing_address": _p("string"),
+		 "restricted": _p("boolean"),
+		 "restricted_reason": _p("string"),
+		 "idempotency_key": _p("string", description="Optional. An edit sets "
+		                       "values, so repeating it changes nothing more.")},
+		required=("account",),
+		property=True,
+		mutating=True,
+		bools=("use_default_credit_days", "restricted"),
+		group="Billing",
+	),
+	_t(
+		"record_ar_payment",
+		"ledger.city_ledger_settle",
+		"""Record a payment a company made on its account (bank transfer,
+		cheque). From an agent it does not post: it waits for a Finance user
+		to confirm it with their PIN, and the result says pending with the
+		request id and the bills it would clear (oldest first unless
+		`allocations` [{folio, amount}] names them). received_on
+		(YYYY-MM-DD) is the date the bank received it, the business date if
+		left out. Confirm the amount and reference with the user first.
+		An agent can't reverse a payment; Finance does that on the account.""",
+		{"account": _p("string"),
+		 "amount": _p("number"),
+		 "mode": _p("string", description="Bank Transfer (default), Cheque, Card, Cash or Other."),
+		 "reference": _p("string", description="UTR or cheque number."),
+		 "allocations": _p("array", items=_p("object")),
+		 "received_on": _p("string"),
+		 "idempotency_key": PAYMENT_KEY_PARAM},
+		required=("account", "amount"),
+		mutating=True,
+		group="Billing",
+	),
+	_t(
 		"payables_aging",
 		"payables.payables_aging",
 		"""What the hotel owes each supplier (accounts payable), aged by due
@@ -1293,12 +1494,15 @@ TOOLS: tuple[ToolSpec, ...] = (
 		"""Record a refundable security deposit the guest has paid (villas:
 		the damage deposit). It is held on the guest folio as a liability,
 		not revenue, and refunded or withheld at check-out. mode: one of the
-		property's payment modes. Confirm the amount with staff first.""",
+		property's payment modes. Confirm the amount with staff first.
+		Pass idempotency_key (new UUID per collect) so a retry does not post
+		twice.""",
 		{
 			"reservation": _p("string"),
 			"amount": _p("number"),
 			"mode": _p("string"),
 			"reference": _p("string"),
+			"idempotency_key": PAYMENT_KEY_PARAM,
 		},
 		required=("reservation", "amount", "mode"),
 		mutating=True,
@@ -2143,6 +2347,28 @@ TOOLS: tuple[ToolSpec, ...] = (
 		group="Briefings",
 	),
 	_t(
+		"business_date",
+		"reports.business_date",
+		"""The property's open business date (the day the next night audit
+		closes) and today's calendar date. Read-only.""",
+		{},
+		property=True,
+		group="Briefings",
+	),
+	_t(
+		"kpi_snapshots",
+		"reports.kpi_snapshots",
+		"""Daily KPI snapshots of closed business dates, written once at night
+		audit and equal to the manager flash for each date: occupancy, ADR,
+		RevPAR, revenue by group, collections by mode and the AR balance.
+		from_date..to_date YYYY-MM-DD, both included, at most 366 days. A date
+		not yet closed has no snapshot. Read-only.""",
+		{"from_date": _p("string", format="date"), "to_date": _p("string", format="date")},
+		required=("from_date",),
+		property=True,
+		group="Briefings",
+	),
+	_t(
 		"night_audit_report",
 		"audit_report.night_audit_report",
 		"""The night audit report for a business date (default: the last one
@@ -2328,6 +2554,79 @@ TOOLS: tuple[ToolSpec, ...] = (
 		group="Billing",
 		module="",
 	),
+	# AI guest booking (#228): only a `guest.booking` service account sees
+	# these (kamra.guest_booking); the booking engine prices and holds
+	_t(
+		"guest_search_stay",
+		"guest_booking.search",
+		"""Rooms free for a guest's stay with the real total per meal plan and what is
+		due now under the hotel's payment policy. Always search before holding.""",
+		{
+			"check_in_date": _p("string", format="date"),
+			"check_out_date": _p("string", format="date"),
+			"adults": _p("integer"),
+			"children": _p("integer"),
+			"child_ages": _p("array", items=_p("integer")),
+			"voucher_code": _p("string"),
+		},
+		required=("check_in_date", "check_out_date"),
+		property=True,
+		group="Channels",
+	),
+	_t(
+		"guest_hold_booking",
+		"guest_booking.hold",
+		"""Book the stay for the guest (name and phone required). If nothing is due now the
+		hotel confirms it at once; otherwise it is held until hold_expires_on - send
+		guest_payment_link before then. Pass an idempotency_key so a retry can't book twice.""",
+		{
+			"room_type": _p("string"),
+			"check_in_date": _p("string", format="date"),
+			"check_out_date": _p("string", format="date"),
+			"guest_name": _p("string"),
+			"phone": _p("string"),
+			"email": _p("string"),
+			"adults": _p("integer"),
+			"children": _p("integer"),
+			"child_ages": _p("array", items=_p("integer")),
+			"meal_plan": _p("string"),
+			"special_requests": _p("string"),
+			"voucher_code": _p("string"),
+			"idempotency_key": IDEMPOTENCY_KEY_PARAM,
+		},
+		required=("room_type", "check_in_date", "check_out_date", "guest_name", "phone"),
+		property=True,
+		mutating=True,
+		group="Channels",
+	),
+	_t(
+		"guest_payment_link",
+		"guest_booking.payment_link",
+		"""A payment link (the hotel's gateway) for the advance still due on a booking this
+		connection made. Paying it confirms the booking.""",
+		{"reservation": _p("string")},
+		required=("reservation",),
+		mutating=True,
+		group="Channels",
+	),
+	_t(
+		"guest_confirm_booking",
+		"guest_booking.confirm",
+		"""Confirm a held booking - refused until the advance is paid (or nothing was due).""",
+		{"reservation": _p("string")},
+		required=("reservation",),
+		mutating=True,
+		group="Channels",
+	),
+	_t(
+		"guest_booking_status",
+		"guest_booking.status",
+		"""Status, dates, total, advance paid and still due, and hold expiry of a booking
+		this connection made.""",
+		{"reservation": _p("string")},
+		required=("reservation",),
+		group="Channels",
+	),
 )
 
 BY_NAME: dict[str, ToolSpec] = {t.name: t for t in TOOLS}
@@ -2363,9 +2662,11 @@ IDEMPOTENT = frozenset({
 	"create_booking", "create_itinerary", "add_to_waitlist", "pickup_group_room", "set_late_arrival",
 	"set_room_hk_status", "set_room_rate", "run_night_audit", "rebuild_audit_pack",
 	"assign_rooms_apply", "open_guest_bills",
+	"create_ar_account", "update_ar_account", "record_ar_payment",
+	"guest_hold_booking", "guest_confirm_booking",
 })
 # Tools that reach someone outside Kamra (a message to the guest)
-OPEN_WORLD = frozenset({"send_payment_link", "send_deposit_link"})
+OPEN_WORLD = frozenset({"send_payment_link", "send_deposit_link", "guest_payment_link"})
 _TITLE_WORDS = {"hk": "HK", "pos": "POS", "kot": "KOT", "id": "ID", "ar": "AR"}
 
 

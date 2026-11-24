@@ -87,7 +87,7 @@ or **Manage** on a row), where each role says in a line what it opens.
 | Front Desk | Bookings, check-in and out, guests, folios, the cashier till |
 | Revenue Manager | Rates, seasons, guardrails, channels, the booking engine, banquet sales |
 | Finance | Billing, ledgers, night audit, exports, tax and cashier controls |
-| Night Auditor | End of Day: arrivals, departures, cashier closure, the audit pack |
+| Night Auditor | Night Audit: arrivals, departures, closing tills, the audit pack |
 | F&B Manager | Outlets, the menu, waiters and tables, the kitchen display, F&B reports and settings, approving POS voids. No folios, till or finance |
 | Housekeeping Supervisor | The Housekeeping Board, inspections, task deadlines, laundry pricing |
 | Housekeeping | Their own tasks, room status, lost & found, usually on the phone app |
@@ -129,12 +129,26 @@ switching a module back on brings it back as it was.
 - **ZATCA e-invoicing**: shown for Saudi Arabia only. See
   [Country setup](/country-setup).
 
+## Languages
+
+**Settings → Languages** lists every language Kamra ships. Switch off
+the ones this site does not use. Sign-in, the staff app, the booking
+page and self check-in then offer only the ones left on. English stays
+on. Hotel Admin only.
+
+The choice is for the whole site, not one property. A language you
+switch off is kept: a browser that had it selected comes back to it if
+you switch it on again. Until then the staff app uses English. Guests
+fall back to the property's booking language when that one is still on,
+then to English. A language added in a later release is on until you
+switch it off.
+
 ## Appearance
 
 **Settings → Appearance** sets the theme (light, dark or follow the
-system) and the language
-for this browser only. Choosing Arabic switches the layout to right to
-left.
+system) and the language for this browser only. The list is the
+languages switched on under **Settings → Languages**. A right-to-left
+language, such as Arabic, flips the layout.
 
 ![Appearance: theme and language](/img/settings/appearance.png)
 

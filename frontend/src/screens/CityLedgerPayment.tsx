@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { call } from "../lib/api"
+import { call, newIdempotencyKey } from "../lib/api"
 import { serverError } from "../lib/resource"
 import { Button } from "../components/ui/button"
 import { Sheet } from "../components/ui/sheet"
@@ -39,14 +39,20 @@ type Account = {
   d90p: number
   overdue: number
   open_items: OpenItem[]
-  payments: { name: string; posting_date: string; credit: number; reference?: string }[]
+  payments: { name: string; posting_date: string; credit: number; debit?: number; reference?: string; reverses?: string | null }[]
+  payment_pin_required?: boolean
+  // taxes a payer may withhold here (the country pack's, #521)
+  withholding_taxes?: { code: string; label: string; rates: number[] }[]
 }
 
 type Result = {
-  payment: string
-  balance: number
+  payment?: string
+  balance?: number
   applied: { folio: string; amount: number }[]
   unapplied: number
+  withheld?: { folio: string; tax_label: string; amount: number }[]
+  // an AI agent's payment waits for Finance (never from this screen's user)
+  pending?: boolean
 }
 
 // plus the country's instant modes (a wallet / instant transfer)
@@ -65,11 +71,24 @@ export default function CityLedgerPayment(props: {
   const [amount, setAmount] = useState("")
   const [mode, setMode] = useState("Bank Transfer")
   const [reference, setReference] = useState("")
+  // blank = the business date
+  const [receivedOn, setReceivedOn] = useState("")
+  const [pin, setPin] = useState("")
   const [manual, setManual] = useState(false)
   const [picks, setPicks] = useState<Record<string, string>>({})
   const [step, setStep] = useState<"form" | "confirm" | "done">("form")
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<Result | null>(null)
+  // one key per payment: a retry of the same press sends it again and the
+  // server posts nothing the second time; a new key after it lands
+  const [payKey, setPayKey] = useState(newIdempotencyKey)
+  // tax the company kept back, per bill (TDS and the like)
+  const [withTax, setWithTax] = useState(false)
+  const [tax, setTax] = useState("")
+  const [rate, setRate] = useState("")
+  const [held, setHeld] = useState<Record<string, string>>({})
+  const [certNo, setCertNo] = useState("")
+  const [certPeriod, setCertPeriod] = useState("")
 
   useEffect(() => {
     call<Account>("kamra.ledger.city_ledger_account", { account: props.account })
@@ -78,7 +97,16 @@ export default function CityLedgerPayment(props: {
   }, [props.account])
 
   const amt = Number(amount) || 0
-  const items = useMemo(() => acc?.open_items ?? [], [acc])
+  const taxes = useMemo(() => acc?.withholding_taxes ?? [], [acc])
+  const taxDef = taxes.find((x) => x.code === tax) ?? taxes[0]
+  const withheld = useMemo(() => (withTax ? Object.entries(held) : [])
+    .map(([folio, v]) => ({ folio, amount: r2(Number(v) || 0) }))
+    .filter((w) => w.amount > 0), [withTax, held])
+  // what each bill owes once the withheld part comes off (the server's rule)
+  const items = useMemo(() => (acc?.open_items ?? []).map((it) => ({
+    ...it, owed: it.outstanding, outstanding: r2(it.outstanding - (withTax ? Number(held[it.folio]) || 0 : 0)),
+  })), [acc, withTax, held])
+  const heldTotal = r2(withheld.reduce((s, w) => s + w.amount, 0))
 
   // what the payment will clear - mirrors the server's rule for the preview
   const plan = useMemo(() => {
@@ -92,6 +120,7 @@ export default function CityLedgerPayment(props: {
     const out: { folio: string; amount: number }[] = []
     for (const it of items) {
       if (left <= 0) break
+      if (it.outstanding <= 0) continue
       const take = r2(Math.min(left, it.outstanding))
       out.push({ folio: it.folio, amount: take })
       left = r2(left - take)
@@ -104,6 +133,10 @@ export default function CityLedgerPayment(props: {
 
   const problem = (() => {
     if (amt <= 0) return "Enter the amount received."
+    for (const w of withheld) {
+      const it = items.find((i) => i.folio === w.folio)
+      if (it && it.outstanding < -0.005) return `Tax withheld on ${it.invoice_number || it.folio} is more than it owes.`
+    }
     if (manual) {
       for (const p of plan) {
         const it = items.find((i) => i.folio === p.folio)
@@ -138,7 +171,15 @@ export default function CityLedgerPayment(props: {
         mode,
         reference: reference.trim() || undefined,
         allocations: manual ? JSON.stringify(plan) : undefined,
+        idempotency_key: payKey,
+        received_on: receivedOn || undefined,
+        pin: pin || undefined,
+        withholdings: withheld.length ? JSON.stringify(withheld.map((w) => ({
+          ...w, tax: taxDef?.code, rate: rate || undefined,
+          certificate_number: certNo.trim() || undefined, certificate_period: certPeriod.trim() || undefined,
+        }))) : undefined,
       })
+      setPayKey(newIdempotencyKey())
       setResult(out)
       setStep("done")
       props.onPosted()
@@ -164,7 +205,7 @@ export default function CityLedgerPayment(props: {
     ) : step === "confirm" ? (
       <div className="flex justify-end gap-2">
         <Button variant="outline" disabled={busy} onClick={() => setStep("form")}>{translate("Back")}</Button>
-        <Button disabled={busy} onClick={() => void submit()}>
+        <Button disabled={busy || (!!acc?.payment_pin_required && !pin)} onClick={() => void submit()}>
           {busy ? translate("Recording…") : translate("Confirm {v0}", { v0: String(fmtMoney(amt)) })}
         </Button>
       </div>
@@ -187,8 +228,12 @@ export default function CityLedgerPayment(props: {
         <p className="text-sm text-zinc-400">{translate("Loading account…")}</p>
       ) : step === "done" && result ? (
         <div className="space-y-3 text-sm">
-          <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">{translate("Payment recorded. Account balance is now ")}{fmtMoney(result.balance)}.
-          </p>
+          {result.pending ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900">{translate("Recorded for Finance to confirm. It does not change the account until a Finance user confirms it with their PIN.")}</p>
+          ) : (
+            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">{translate("Payment recorded. Account balance is now ")}{fmtMoney(result.balance ?? 0)}.
+            </p>
+          )}
           <ul className="space-y-1">
             {result.applied.map((a) => (
               <li key={a.folio} className="flex justify-between">
@@ -197,6 +242,16 @@ export default function CityLedgerPayment(props: {
               </li>
             ))}
           </ul>
+          {result.withheld?.length ? (
+            <ul className="space-y-1 text-zinc-600">
+              {result.withheld.map((w) => (
+                <li key={w.folio} className="flex justify-between">
+                  <span>{label(w.folio)} · {translate("{v0} withheld", { v0: w.tax_label })}</span>
+                  <span className="tabular-nums">{fmtMoney(w.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {result.unapplied > 0 ? (
             <p className="text-zinc-500">
               {fmtMoney(result.unapplied)}{translate(" kept as unapplied credit. It settles the company's next city-ledger bill.")}</p>
@@ -205,7 +260,8 @@ export default function CityLedgerPayment(props: {
       ) : step === "confirm" ? (
         <div className="space-y-4 text-sm">
           <p>{translate("Record ")}<b>{fmtMoney(amt)}</b>{translate(" from ")}<b>{acc.company}</b>{translate(" by ")}{translate(mode)}
-            {reference.trim() ? translate(" (ref {v0})", { v0: String(reference.trim()) }) : ""}.
+            {reference.trim() ? translate(" (ref {v0})", { v0: String(reference.trim()) }) : ""}
+            {receivedOn ? translate(", received {v0}", { v0: receivedOn }) : ""}.
           </p>
           <div className="rounded-lg border border-zinc-200">
             <div className="border-b border-zinc-100 px-4 py-2 text-xs uppercase text-zinc-400">
@@ -223,12 +279,27 @@ export default function CityLedgerPayment(props: {
               ) : null}
             </ul>
           </div>
+          {heldTotal > 0 ? (
+            <p className="text-zinc-600">
+              {translate("Plus {v0} {v1} withheld, cleared from the bills and kept as tax withheld until its certificate comes in.", {
+                v0: String(fmtMoney(heldTotal)), v1: taxDef?.label ?? "",
+              })}
+            </p>
+          ) : null}
           {unapplied > 0 ? (
             <p className="text-amber-700">
               {fmtMoney(unapplied)}{translate(" is more than the bills it pays. It stays on the account as unapplied credit.")}</p>
           ) : null}
-          <p className="text-zinc-500">{translate("Balance after: ")}{fmtMoney(r2(acc.balance - amt))}
+          <p className="text-zinc-500">{translate("Balance after: ")}{fmtMoney(r2(acc.balance - amt - heldTotal))}
           </p>
+          {acc.payment_pin_required ? (
+            <label className="block max-w-xs">
+              <span className="mb-1 block text-zinc-500">{translate("Your cashier PIN")}</span>
+              <input type="password" inputMode="numeric" autoComplete="off"
+                className="w-full rounded-lg border border-zinc-300 px-2 py-1.5"
+                value={pin} onChange={(e) => setPin(e.target.value)} />
+            </label>
+          ) : null}
         </div>
       ) : (
         <div className="space-y-5">
@@ -257,7 +328,7 @@ export default function CityLedgerPayment(props: {
             ))}
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-4">
             <label className="text-sm">
               <span className="mb-1 block text-zinc-500">{translate("Amount received")}</span>
               <input
@@ -290,6 +361,54 @@ export default function CityLedgerPayment(props: {
                 onChange={(e) => setReference(e.target.value)}
               />
             </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-zinc-500">{translate("Received on")}</span>
+              <input
+                type="date"
+                className="w-full rounded-lg border border-zinc-300 px-2 py-1.5"
+                value={receivedOn}
+                onChange={(e) => setReceivedOn(e.target.value)}
+                title={translate("Leave blank for today's business date")}
+              />
+            </label>
+          </div>
+
+          <div className="space-y-2 text-sm">
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={withTax} onChange={(e) => setWithTax(e.target.checked)} />
+              {translate("The company withheld tax (enter it per bill below)")}
+            </label>
+            {withTax ? (
+              <div className="grid gap-3 sm:grid-cols-4">
+                <label>
+                  <span className="mb-1 block text-zinc-500">{translate("Tax")}</span>
+                  <select className="w-full rounded-lg border border-zinc-300 px-2 py-1.5"
+                    value={taxDef?.code ?? ""} onChange={(e) => { setTax(e.target.value); setRate("") }}>
+                    {taxes.map((x) => <option key={x.code} value={x.code}>{translate(x.label)}</option>)}
+                  </select>
+                </label>
+                {taxDef?.rates.length ? (
+                  <label>
+                    <span className="mb-1 block text-zinc-500">{translate("Rate")}</span>
+                    <select className="w-full rounded-lg border border-zinc-300 px-2 py-1.5"
+                      value={rate} onChange={(e) => setRate(e.target.value)}>
+                      <option value="">-</option>
+                      {taxDef.rates.map((r) => <option key={r} value={String(r)}>{r}%</option>)}
+                    </select>
+                  </label>
+                ) : null}
+                <label>
+                  <span className="mb-1 block text-zinc-500">{translate("Certificate no. (if in)")}</span>
+                  <input className="w-full rounded-lg border border-zinc-300 px-2 py-1.5" maxLength={140}
+                    value={certNo} onChange={(e) => setCertNo(e.target.value)} />
+                </label>
+                <label>
+                  <span className="mb-1 block text-zinc-500">{translate("Certificate period")}</span>
+                  <input className="w-full rounded-lg border border-zinc-300 px-2 py-1.5" maxLength={140}
+                    value={certPeriod} onChange={(e) => setCertPeriod(e.target.value)} />
+                </label>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap gap-2 text-sm" role="radiogroup">
@@ -309,6 +428,7 @@ export default function CityLedgerPayment(props: {
                   <th className="py-2 pr-3">{translate("Billed on")}</th>
                   <th className="py-2 pr-3">{translate("Due")}</th>
                   <th className="py-2 pr-3 text-right">{translate("Owed")}</th>
+                  {withTax ? <th className="py-2 pr-3 text-right">{translate("Tax withheld")}</th> : null}
                   <th className="py-2 text-right">{translate("This payment")}</th>
                 </tr>
               </thead>
@@ -333,7 +453,15 @@ export default function CityLedgerPayment(props: {
                           <span className="ml-1 text-xs">({it.days_overdue}{translate("d late)")}</span>
                         ) : null}
                       </td>
-                      <td className="py-2 pr-3 text-right tabular-nums">{fmtMoney(it.outstanding)}</td>
+                      <td className="py-2 pr-3 text-right tabular-nums">{fmtMoney(it.owed)}</td>
+                      {withTax ? (
+                        <td className="py-2 pr-3 text-right">
+                          <input type="number" min="0" step="0.01" inputMode="decimal"
+                            className="w-24 rounded border border-zinc-300 px-1.5 py-1 text-right"
+                            value={held[it.folio] ?? ""} aria-label={translate("Tax withheld")}
+                            onChange={(e) => setHeld((cur) => ({ ...cur, [it.folio]: e.target.value }))} />
+                        </td>
+                      ) : null}
                       <td className="py-2 text-right tabular-nums">
                         {manual && picked ? (
                           <input
@@ -352,7 +480,7 @@ export default function CityLedgerPayment(props: {
                 })}
                 {!items.length ? (
                   <tr>
-                    <td colSpan={manual ? 7 : 6} className="py-6 text-center text-zinc-400">{translate("No open bills. A payment now is kept as credit.")}</td>
+                    <td colSpan={(manual ? 7 : 6) + (withTax ? 1 : 0)} className="py-6 text-center text-zinc-400">{translate("No open bills. A payment now is kept as credit.")}</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -372,7 +500,7 @@ export default function CityLedgerPayment(props: {
                 {acc.payments.map((p) => (
                   <li key={p.name} className="flex justify-between">
                     <span>{p.posting_date} · {p.reference || "-"}</span>
-                    <span className="tabular-nums">{fmtMoney(p.credit)}</span>
+                    <span className={`tabular-nums ${p.reverses ? "text-rose-700" : ""}`}>{fmtMoney(p.reverses ? -(p.debit ?? 0) : p.credit)}</span>
                   </li>
                 ))}
               </ul>

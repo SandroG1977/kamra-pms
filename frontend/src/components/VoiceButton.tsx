@@ -33,6 +33,9 @@ const Ctor: RecognizerCtor | undefined =
     : ((window as unknown as { SpeechRecognition?: RecognizerCtor }).SpeechRecognition ??
       (window as unknown as { webkitSpeechRecognition?: RecognizerCtor }).webkitSpeechRecognition)
 
+/** Chrome, Edge and Safari. Firefox and most in-app browsers have no mic. */
+export const voiceSupported = Boolean(Ctor)
+
 // the languages a front desk is most likely to speak; the browser hears each
 export const VOICE_LANGS: [string, string][] = [
   ["en-IN", "English (India)"],
@@ -46,6 +49,10 @@ export const VOICE_LANGS: [string, string][] = [
   ["ar-SA", "العربية"],
   ["es-ES", "Español"],
   ["pt-BR", "Português (Brasil)"],
+  ["zh-CN", "简体中文"],
+  ["fil-PH", "Filipino"],
+  ["vi-VN", "Tiếng Việt"],
+  ["sw-TZ", "Kiswahili"],
 ]
 
 const KEY = "kamra_voice_lang"
@@ -59,9 +66,14 @@ export function agentLang(): string {
     // private window: fall through to a guess
   }
   const known = (c: string) => VOICE_LANGS.find(([v]) => v.toLowerCase() === c.toLowerCase())?.[0]
-  return known(navigator.language) ??
-    VOICE_LANGS.find(([v]) => v.startsWith(`${getLang()}-`))?.[0] ??
-    "en-IN"
+  const ui = getLang()
+  // a regional variant of the language on screen (pt -> pt-BR; zh-CN matches itself)
+  const forUI = known(ui) ?? VOICE_LANGS.find(([v]) => v.startsWith(`${ui}-`))?.[0]
+  // A non-English desk speaks the language it shows. An English desk must not:
+  // picking the first en-* entry silently dropped a hi-IN, ta-IN or en-US desk
+  // to en-IN, so let the browser name its own language instead.
+  if (ui !== "en" && forUI) return forUI
+  return known(navigator.language) ?? forUI ?? "en-IN"
 }
 
 export interface VoiceHandle {
@@ -92,7 +104,19 @@ export default function VoiceButton(props: {
   // result, which would refill the box after it was sent
   useImperativeHandle(props.ref, () => ({ stop: () => rec.current?.abort() }), [])
 
-  if (!Ctor) return null
+  if (!Ctor) {
+    return (
+      <button
+        type="button"
+        disabled
+        aria-label={translate("Microphone isn't available in this browser")}
+        title={translate("This browser can't use the microphone. Type instead, or open Kamra in Chrome or Safari.")}
+        className="flex size-9 items-center justify-center rounded-full text-zinc-300"
+      >
+        <Mic className="size-4" />
+      </button>
+    )
+  }
 
   function start() {
     if (!Ctor || props.disabled) return

@@ -49,13 +49,18 @@ MODULES = [
     ("guest_documents", "Guest documents (photo, ID and address proof images)", "Stored privately and served as data URLs to the desk. A property on Verify & Discard keeps no ID images."),
     ("printing", "Kitchen printers (routing, print stations, print queue)", ""),
     ("laundry", "Laundry (housekeeping)", ""),
+    ("housekeeping", "Housekeeping (room status cases, inspection pass rate)", "Each part is behind its Housekeeping setting; switched off, the endpoints refuse or report enabled: false."),
     ("banquet", "Banquets (functions, quotations, event orders)", ""),
+    ("recreation", "Recreation (gym, pool, spa: visits, memberships, bookings, passes)",
+     "Walk-in and membership money goes in the till with a receipt; a guest's paid access is on the folio."),
     ("migrate", "Migration (CSV import)", ""),
     ("golive", "Go-live data (companies, opening balances, reconciliation)", ""),
     ("inventory", "Inventory & recipes", ""),
     ("menu_import", "Menu bulk import", ""),
     ("id_documents", "Guest ID documents", ""),
     ("crs", "Central reservations (chain)", ""),
+    ("guest_booking", "AI guest booking (guest.booking scope)",
+     "Only a service account with the guest.booking scope may call these; it sees only the bookings it made."),
     ("dashboards", "Dashboards", ""),
     ("reports", "Reports", ""),
     ("audit_report", "Night audit report (day, MTD, YTD)", "Read only. Food and beverage come from the restaurant bills; the year starts where the country pack says."),
@@ -70,11 +75,15 @@ MODULES = [
      "Bills land on the city ledger above; credit control runs on every new invoice."),
     ("payables", "Accounts payable (vendors, supplier bills, approval, payments)",
      "Finance and Hotel Admin enter vendors and bills; only Hotel Admin approves and pays."),
+    ("erpnext_bridge", "ERPNext bridge (daily journal, supplier bills, HR employee link)",
+     "Opt-in, and only when ERPNext (and Frappe HR for the employee link) is on the same site."),
     ("books", "Management books (next days of cash, P&L, balance sheet)",
      "Read-only management views. Not statutory accounts."),
     ("night_audit", "Night audit (End of Day checklist, audit pack)", ""),
     ("agents_api", "Activity ledger", ""),
     ("settings", "Settings hub (module settings)", ""),
+    ("languages", "UI languages (which languages sign-in, staff and guests are offered)",
+     "The list is the whole site. English stays on. Nothing saved means every shipped language is on."),
     ("rooms", "Rooms (room board, room detail and history, insights)",
      "Read-only. Room changes go through set_housekeeping_status, the room block endpoints, check_in / check_out and move_reservation."),
     ("floors", "Floors (Admin > Rooms: Add rooms)",
@@ -88,6 +97,10 @@ MODULES = [
      "Hotel Admin / System Manager. Events are signed with HMAC-SHA256 - see the Integrations page."),
     ("pos_interface", "External POS (room charges from a third-party POS)",
      "For a POS Integrator service user. ticket_id makes every posting idempotent."),
+    ("service_accounts", "Service accounts (scoped keys for connected apps)",
+     "IT only. A key reaches only its scopes and properties; see Connected apps."),
+    ("apps", "Connected apps (connect, pair, disconnect, property profile)",
+     "pair is the one allow_guest endpoint here, rate-limited and logged; see Connected apps."),
     ("public_api", "Public (no auth - booking page, check-in)",
      "These are allow_guest endpoints: no token needed, rate-limited."),
 ]
@@ -240,6 +253,9 @@ Content-Type: application/json
 - **Try it in Postman:** [download the collection](/kamra.postman_collection.json),
   set `base_url`, `api_key` and `api_secret` collection variables, go.
 - Endpoints marked **public** are `allow_guest` (no token; rate-limited).
+- What we promise not to break, and how a name is retired:
+  [API stability](/api-stability) and the machine-readable
+  [contract.json](/contract.json).
 """]
     for m in modules:
         out.append(f"\n## {m['folder']}\n")

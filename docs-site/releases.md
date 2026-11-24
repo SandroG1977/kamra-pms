@@ -9,6 +9,17 @@ Install or upgrade: [Frappe Cloud Marketplace](/self-hosting/frappe-cloud)
 or [self-hosting](/self-hosting/). After upgrade, open
 **Admin → System Health** to confirm the site version.
 
+## New: Apache-2.0
+
+Announced 16 Nov 2026.
+
+Kamra PMS core is moving to the Apache License 2.0. New releases after the
+change are permissive: use, change, host and sell under Apache-2.0, including
+in proprietary products, with attribution. Published AGPL releases stay as
+they are. The free Community product and the [Open Pledge](https://kamrapms.com/open-pledge/)
+do not change. Full note: [Kamra is Apache-2.0](/apache-2.0). Contributor
+vote: [GitHub #591](https://github.com/Kamra-PMS/kamra-pms/issues/591).
+
 ## New: free video course
 
 Released 27 Oct 2026.
@@ -21,7 +32,145 @@ voice and cleaner audio. The first episodes are out now, and the rest follow
 every Monday, Wednesday and Friday.
 [Watch the playlist](https://www.youtube.com/playlist?list=PLcNTRQwzkzAs).
 
-## Current stable: v2.6.22
+## Current stable: v2.8.0
+
+Released 21 Nov 2026.
+[GitHub release](https://github.com/Kamra-PMS/kamra-pms/releases/tag/v2.8.0).
+
+- **Apache-2.0.** Kamra core moves off AGPL.
+  [What changed](/apache-2.0).
+- **Channex sends only what changed** (thanks
+  [@diegolweb](https://github.com/diegolweb),
+  [#650](https://github.com/Kamra-PMS/kamra-pms/pull/650)). Availability
+  and rates go out as date ranges, at most 10 calls a minute per
+  endpoint. A full sync runs only when you ask for it. STAAH and
+  AioSell keep the hourly push.
+  [Channel manager](/channel-manager)
+- **An in-house guest's own bill stays open** (thanks
+  [@madhukarah](https://github.com/madhukarah),
+  [#648](https://github.com/Kamra-PMS/kamra-pms/pull/648)).
+  **Close & generate invoice** refuses that Guest folio. Use
+  **Settle & continue stay** (`part_settle_folio`).
+  [Close the folio](/billing#close-the-folio-and-print-the-invoice)
+- **A country pack can supply the exchange rates** (thanks
+  [@diegolweb](https://github.com/diegolweb),
+  [#644](https://github.com/Kamra-PMS/kamra-pms/pull/644)).
+  **Fetch today's rates** uses the pack's `market_rates` when the pack
+  defines one. Otherwise the desk still uses Exchange Rate API.
+  [Currency desk](/billing#fetch-todays-rates-online)
+- **Languages.** German, Bahasa Indonesia, Filipino and Simplified
+  Chinese are on the staff app. Simplified Chinese is refined (thanks
+  [@baiyu0616a](https://github.com/baiyu0616a),
+  [#618](https://github.com/Kamra-PMS/kamra-pms/pull/618),
+  [#647](https://github.com/Kamra-PMS/kamra-pms/pull/647)). Missing
+  Spanish strings are filled in (thanks
+  [@diegolweb](https://github.com/diegolweb),
+  [#651](https://github.com/Kamra-PMS/kamra-pms/pull/651)). Bahasa
+  Indonesia is thanks to [@kentrick22](https://github.com/kentrick22),
+  [#625](https://github.com/Kamra-PMS/kamra-pms/pull/625). Hotel Admin
+  can switch languages off under **Settings → Languages**.
+- **Germany and the Philippines.** Germany: 7% MwSt on lodging, 19% on
+  food and services, EUR (requested in
+  [#623](https://github.com/Kamra-PMS/kamra-pms/issues/623) by
+  [@andreasnewuser](https://github.com/andreasnewuser)). Philippines:
+  PhilSys and the other local IDs, GCash and Maya.
+  [Country setup](/country-setup)
+- **Type a night's price** on **New booking**. Revenue Manager and
+  Hotel Admin can set each night under **Rates for these dates**. A
+  typed night does not combine with a rate plan, a voucher, an OTA
+  total or day use.
+  [Make a booking](/reservations#make-a-booking)
+- **Night audit.** **Ask Kamra Agent** uses the property you are
+  auditing. An English screen keeps English dates when the country
+  pack is Thai.
+- **Install.** The Frappe `payments` app requirement is now v16
+  (`>=16.0.0,<17.0.0`), thanks
+  [@ankitxxdevil](https://github.com/ankitxxdevil),
+  [#641](https://github.com/Kamra-PMS/kamra-pms/pull/641).
+
+## Recent stables
+
+### v2.7.10
+
+Released 14 Nov 2026.
+[GitHub release](https://github.com/Kamra-PMS/kamra-pms/releases/tag/v2.7.10).
+
+- **Night Audit on one page** - only the checks that need you, each with
+  its list and the buttons that clear it; one **Close** button; the audit
+  pack opens on the same page. [Night audit](/night-audit)
+- **Receivables work queues** - filters for overdue, over the credit
+  limit, in house not billed and paid ahead; aging columns; email
+  statements or month-end bills to many companies at once; a statement
+  preview to print, save as PDF or email. Reverse, confirm and date company
+  payments, and mark bills as disputed. [Bill a company](/billing#bill-a-company)
+- **Books check** (was Ledgers) - one line says whether folios and
+  ledgers agree; who makes up each ledger; the journal over a date range.
+  [Check the books](/billing#check-the-books)
+- **Export CSV everywhere** - every audit pack table and every list in the
+  finance screens; cells that would run as spreadsheet formulas are made
+  safe.
+- **Front desk** - mark a no-show from Today or the reservation with a
+  confirm; reverse a same-day check-in; settle a bill with several payment
+  modes at check-out; check-out date and times in the booking dialog; a
+  setting for assigning the room when a reservation is made.
+- **Billing** - a void keeps the line and posts a signed reversal with the
+  reason; GL code on every folio line; note-by-note till count; manager's
+  flash and dashboards show allowances apart from revenue.
+- **Connected apps** - connect an app in one step with a signed manifest
+  and a one-time pairing code; scoped service accounts; webhook events for
+  voids, discounts, refunds, rate overrides, approvals, deposits, AR, till
+  close and group releases.
+- **Agents (MCP)** - refund, correct and transfer folio charges.
+- **Sign-in** - password reset from the login page and change password in
+  the account menu.
+- **Self-hosting** - Valkey is the default cache and queue; a public
+  contract file and a breaking-change check in CI.
+
+### v2.7.9
+
+Released 12 Nov 2026. The agent books by the hour, takes advances and reads
+outlets and expenses; monthly department revenue; the Receivables finance
+overview; a stay is checked out only through Check out.
+
+### v2.7.8
+
+Released 10 Nov 2026. The agent knows room floors and formats amounts; AI
+provider URLs matched by host.
+
+### v2.7.7
+
+Released 7 Nov 2026. Holiday packages with tiered occupancy pricing, extra
+nights and OTA strategies; the Ask Kamra drawer on the docs site; one
+account menu in the top bar; a phone menu for in-app navigation.
+
+### v2.7.6
+
+Released 6 Nov 2026. Guided desk tasks, food orders and voice input for the
+agent; invoice footer for company and bank details; a notification bell for
+each department; floors and room filters; fixes for races on bookings,
+credit, tills and stock.
+
+### v2.7.5
+
+Released 2 Nov 2026. Folio discounts and promo codes, room import and night
+audit options; Brazilian Portuguese hotel terms; untaxed bills print no tax
+columns.
+
+### v2.7.0 - v2.7.4
+
+30 Oct to 1 Nov 2026. Groups (the main room pays, staggered check-in), the
+Nicaragua country pack, a redesigned booking page, friendly crash and
+offline screens, booking engine language and co-branding, and Frappe's
+setup wizard kept shut on Kamra sites.
+
+### v2.6.23
+
+Released 28 Oct 2026. Booked via for multi-room and walk-ins with OTA
+commission; company statements, due-date reminders and DSO; Portuguese
+(thanks @SandroG1977) and the Brazil country pack; a night audit schedule
+and run log per property; WhatsApp marketing consent.
+
+### v2.6.22
 
 Released 27 Oct 2026.
 [GitHub release](https://github.com/Kamra-PMS/kamra-pms/releases/tag/v2.6.22).
@@ -36,8 +185,6 @@ Released 27 Oct 2026.
 - **Assistant** - chat amounts use the property's currency (thanks
   @ernestoruiz89).
 - **Laundry** - stays under Housekeeping only; tidier house order cards.
-
-## Recent stables
 
 ### v2.6.21
 

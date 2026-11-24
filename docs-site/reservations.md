@@ -49,6 +49,13 @@ booking (see [Change a booking](#change-a-booking)). The stay shows under
 For a stay of a few hours, switch **Overnight** to **Day use** and set the
 time slot. The guest checks in and out the same day.
 
+Under **Rates for these dates**, a Revenue Manager or Hotel Admin can
+type a price on a night. The quote uses that price. A typed night does
+not combine with a rate plan or a voucher, and the fields stay locked
+when the booking already has an OTA sold total or is day use. **Back to
+BAR** returns that night to the rate card. Front Desk cannot set these
+prices.
+
 ## Add company, add-ons and arrival details
 
 Open **Company, add-ons & arrival details** in the booking window for:
@@ -198,6 +205,20 @@ What else is on the tape chart:
 - **Auto-assign arrivals** suggests a room for each arrival without one,
   matched to type and preferences. **Review** marks a choice worth a second
   look; **Assign** places them all.
+
+### Accessible and connecting rooms
+
+On each room (**Admin → Rooms**), tick **Accessible room** and list its
+features (roll-in shower, grab bars), and set its **Connecting room** -
+the room behind the connecting door. Set it on one room and Kamra keeps it
+on both. The Rooms list filters to **Accessible rooms**.
+
+In **New booking**, under the service options, tick **Accessible room**
+for a guest who needs one. Booking two or more rooms at once also offers
+**Connecting rooms**. **Auto-assign arrivals** then gives an accessible
+guest an accessible room (and says so when none is free), and puts two
+stays of the same group or guest that asked for connecting rooms in a
+connecting pair when one is free.
 
 ## Sell from the calendar
 
@@ -436,7 +457,8 @@ lock on the tape chart. Set **Status** to Released to put it back on sale.
   new total and asks before it saves.
 - Every booking, change, move and cancellation is written to the activity
   log with who did it.
-- No-shows are marked by the night audit; see [Night audit](/night-audit).
+- No-shows are marked by the night audit, or at the desk with **Mark no-show**
+  on Today or the reservation; see [Night audit](/night-audit).
 
 ## Troubleshooting
 

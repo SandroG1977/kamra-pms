@@ -1,5 +1,5 @@
 import { RateOptions } from "./RateOptions"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { htmlToText } from "../lib/utils"
 import { useNavigate } from "react-router-dom"
 import { ChevronDown, Loader2, Megaphone, Plus, ShieldAlert, Star, Trash2, X } from "lucide-react"
@@ -16,10 +16,12 @@ import {
   type GuestHit,
   type Quote,
 } from "../lib/api"
+import { pickDefaultRoomType } from "../lib/bookingDefaults"
 import { Button } from "./ui/button"
 import { cur, moneyLocale, useLocale } from "../lib/money"
 import { isPhoneComplete } from "../lib/phone"
-import { parseDate, shiftDate } from "../lib/stay"
+import { nightsBetween, parseDate, shiftDate } from "../lib/stay"
+import { typedNights, type NightPrice } from "../lib/nightPrices"
 import PhoneInput from "./PhoneInput"
 import { clampGuests, sleeps } from "../lib/occupancy"
 import { useT, t as translate, useUILanguage } from "../lib/i18n"
@@ -53,6 +55,8 @@ interface ExtraRoom {
   guest_name: string
   /** rooms of this kind ("Deluxe × 5") */
   count: number
+  /** nights the desk priced by hand for this room (its own, not the main room's) */
+  night_prices?: NightPrice[]
 }
 
 const inputCls =
@@ -194,9 +198,6 @@ export function BookingDialog(props: {
   const [dayUse, setDayUse] = useState(false)
   const [slot, setSlot] = useState({ from: "10:00", to: "18:00" })
   const badSlot = dayUse && (!slot.from || !slot.to || slot.to <= slot.from)
-  const slotArgs = dayUse
-    ? { check_in_time: slot.from, check_out_time: slot.to }
-    : {}
   const [moreOpen, setMoreOpen] = useState(false)
   const [moreRooms, setMoreRooms] = useState<ExtraRoom[]>([])
   const [groupName, setGroupName] = useState("")
@@ -214,6 +215,8 @@ export function BookingDialog(props: {
     valet_parking: false,
     early_checkin: false,
     late_checkout: false,
+    needs_accessible: false,
+    needs_connecting: false,
   })
   const setX = (
     k: keyof typeof extra,
@@ -272,6 +275,21 @@ export function BookingDialog(props: {
   const loc = useLocale()
   const { ensureUnlocked, status: pinStatus } = useCashierAuth()
   const [walkIn, setWalkIn] = useState(!!props.initial.walkIn)
+  // Overnight stay: the arrival and departure time. They default to the
+  // property's standard check-in / check-out time until the desk changes them,
+  // and are kept on the reservation as planned times (display only, never price).
+  const [stayTimes, setStayTimes] = useState<{ from: string | null; to: string | null }>({ from: null, to: null })
+  const stayIn = stayTimes.from ?? (options?.property?.checkin_time ?? "").slice(0, 5)
+  const stayOut = stayTimes.to ?? (options?.property?.checkout_time ?? "").slice(0, 5)
+  // what is typed in the check-out box until it is a valid date after check-in;
+  // null once it is (the nights then follow it)
+  const [outDraft, setOutDraft] = useState<string | null>(null)
+  const outError = outDraft !== null && parseDate(outDraft) !== null
+  const slotArgs = dayUse
+    ? { check_in_time: slot.from, check_out_time: slot.to }
+    : !walkIn && stayIn && stayOut
+      ? { check_in_time: stayIn, check_out_time: stayOut }
+      : {}
   // the room clicked on the tape chart; dropped once the desk picks another type
   const pinnedRoom = !!props.initial.room && !walkIn && form.room_type === props.initial.room_type
   const [freeRooms, setFreeRooms] = useState<FreeRoom[] | null>(null)
@@ -351,12 +369,15 @@ export function BookingDialog(props: {
     }
   }, [profile?.name, form.phone, options?.property?.country])
 
+  // When the desk did not pass a room type, keep auto-picking the cheapest
+  // type that has rooms for the selected dates until they change it (#549).
+  const autoRoomType = useRef(!props.initial.room_type)
+
   useEffect(() => {
     getBookingOptions().then((o) => {
       setOptions(o)
       setForm((f) => ({
         ...f,
-        room_type: f.room_type || o.room_types[0]?.name || "",
         meal_plan: o.meal_plans.find((m) => m.is_default)?.name ?? "",
       }))
     })
@@ -388,6 +409,53 @@ export function BookingDialog(props: {
     : dayUse
       ? form.check_in_date
       : shiftDate(form.check_in_date, Math.max(1, form.nights))
+
+  // Nights the desk priced by hand (date -> price, in the basis the rates
+  // screen shows). Only a Revenue Manager / Hotel Admin may; an OTA total
+  // already sets the price, and a day-use stay is priced by its slot.
+  const [nightPrices, setNightPrices] = useState<Record<string, number>>({})
+  const canSetPrice = !!options?.can_set_rate && otaTotal <= 0 && !dayUse
+  const stayNights = badDate || dayUse
+    ? []
+    : Array.from({ length: Math.max(1, form.nights) }, (_, i) => shiftDate(form.check_in_date, i))
+  const nightPricesArg = canSetPrice ? typedNights(nightPrices, stayNights) : []
+  // a night that is no longer in the stay is dropped with the date change
+  const stayKey = stayNights.join(",")
+  useEffect(() => {
+    if (!stayKey) return // a date still being typed: keep what was entered
+    setNightPrices((p) => {
+      const keep = Object.fromEntries(Object.entries(p).filter(([d]) => stayKey.split(",").includes(d)))
+      return Object.keys(keep).length === Object.keys(p).length ? p : keep
+    })
+  }, [stayKey])
+  const nightPricesParam = nightPricesArg.length ? { night_prices: nightPricesArg } : {}
+
+  useEffect(() => {
+    if (!autoRoomType.current || !options?.room_types.length || badDate) return
+    let live = true
+    const types = options.room_types
+    Promise.all(
+      types.map((rt) =>
+        call<FreeRoom[]>("kamra.api.available_rooms", {
+          property: getCurrentProperty(),
+          room_type: rt.name,
+          check_in_date: form.check_in_date,
+          check_out_date: checkOut,
+          ...(walkIn ? { ready_now: 1 } : {}),
+        })
+          .then((rs) => ({ name: rt.name, n: rs.length }))
+          .catch(() => ({ name: rt.name, n: 0 })),
+      ),
+    ).then((hits) => {
+      if (!live || !autoRoomType.current) return
+      const counts = Object.fromEntries(hits.map((h) => [h.name, h.n]))
+      const pick = pickDefaultRoomType(types, counts)
+      setForm((f) => (f.room_type === pick ? f : { ...f, room_type: pick }))
+    })
+    return () => {
+      live = false
+    }
+  }, [options, form.check_in_date, checkOut, walkIn, badDate])
 
   // a blacklisted guest needs an explicit, reasoned confirmation (Hotel
   // Admin only - the server enforces it); a multi-room group can't override
@@ -430,6 +498,7 @@ export function BookingDialog(props: {
         voucher_code: form.voucher_code || undefined,
         over_capacity_charge: extraCharge || undefined,
         pets: form.pets || undefined,
+        ...nightPricesParam,
       })
         .then((q) => {
           setQuote(q)
@@ -459,6 +528,8 @@ export function BookingDialog(props: {
     form.over_capacity_guests,
     form.pets,
     checkOut,
+    // a typed price re-quotes: the totals, tax and advance follow it
+    JSON.stringify(nightPricesArg),
   ])
 
   // quotes for the additional rooms
@@ -480,13 +551,14 @@ export function BookingDialog(props: {
                 meal_plan: r.meal_plan || undefined,
                 rate_plan: form.rate_plan || undefined,
                 company: form.company || undefined,
+                ...(r.night_prices?.length && canSetPrice ? { night_prices: r.night_prices } : {}),
               }).catch(() => null)
             : Promise.resolve(null),
         ),
       ).then(setMoreQuotes)
     }, 300)
     return () => clearTimeout(t)
-  }, [moreRooms, form.check_in_date, checkOut, form.rate_plan, form.company])
+  }, [moreRooms, form.check_in_date, checkOut, form.rate_plan, form.company, canSetPrice])
 
   // walk-in: the actual rooms free tonight, clean ones first
   useEffect(() => {
@@ -567,6 +639,7 @@ export function BookingDialog(props: {
           pets: form.pets || undefined,
           company: form.company || undefined,
           waitlist: 1,
+          ...nightPricesParam,
           ...slotArgs,
           blacklist_override_reason: blacklistOverride,
         })
@@ -583,6 +656,8 @@ export function BookingDialog(props: {
             adults: form.adults,
             children: form.children,
             meal_plan: form.meal_plan || undefined,
+            // the main room's own nights; each extra room carries its own below
+            ...nightPricesParam,
           },
           ...moreRooms.map((r) => ({
             room_type: r.room_type,
@@ -591,6 +666,7 @@ export function BookingDialog(props: {
             children: r.children,
             meal_plan: r.meal_plan || undefined,
             guest_name: (r.count === 1 && r.guest_name.trim()) || undefined,
+            night_prices: (canSetPrice && r.night_prices?.length ? r.night_prices : undefined),
           })),
         ]
         const roomCount = rooms.reduce((s, r) => s + r.count, 0)
@@ -609,6 +685,10 @@ export function BookingDialog(props: {
           phone: form.phone || undefined,
           company: form.company || undefined,
           rate_plan: form.rate_plan || undefined,
+          stay_details: {
+            needs_accessible: extra.needs_accessible ? 1 : undefined,
+            needs_connecting: extra.needs_connecting ? 1 : undefined,
+          },
           ...viaArgs,
         })
         if (out.skipped.length > 0) {
@@ -663,6 +743,7 @@ export function BookingDialog(props: {
           valet_parking: extra.valet_parking ? 1 : undefined,
           early_checkin: extra.early_checkin ? 1 : undefined,
           late_checkout: extra.late_checkout ? 1 : undefined,
+          needs_accessible: extra.needs_accessible ? 1 : undefined,
         },
         instructions: extra.special_requests
           ? [
@@ -680,6 +761,7 @@ export function BookingDialog(props: {
         credit_override_reason: creditOverride,
         ...viaArgs,
         marketing_consent: offers ? 1 : undefined,
+        ...nightPricesParam,
       })
       await addOthers(res.reservation)
       setDone({ ref: res.reservation, room: res.room })
@@ -735,6 +817,7 @@ export function BookingDialog(props: {
         ...slotArgs,
         blacklist_override_reason: blacklistOverride,
         ...viaArgs,
+        ...nightPricesParam,
         // book, assign and take the money now; the guided check-in
         // (property's required steps) finishes it right after
         defer_check_in: 1,
@@ -966,90 +1049,62 @@ export function BookingDialog(props: {
               </div>
             )}
 
-            {/* Confirmation snapshot so desk staff can read the stay back
-                without reopening the reservation (Fares). */}
-            <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-              <dl className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <dt className="text-xs font-medium text-zinc-400">{t("Guest name")}</dt>
-                  <dd className="mt-1 font-semibold text-zinc-900">
-                    {form.guest_name || "-"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs font-medium text-zinc-400">{t("Phone")}</dt>
-                  <dd className="mt-1 font-semibold text-zinc-900">
-                    {form.phone || "-"}
-                  </dd>
-                </div>
-
-                <div
-                  className={
-                    "sm:col-span-2 rounded-xl border p-4 " +
-                    (done.room
-                      ? "border-brand-200 bg-brand-50"
-                      : "border-zinc-200 bg-zinc-50")
-                  }
-                >
-                  <dt
-                    className={
-                      "text-xs font-semibold " +
-                      (done.room ? "text-brand-700" : "text-zinc-500")
-                    }
-                  >
-                    {t("Room")}
-                  </dt>
-                  <dd
-                    className={
-                      "mt-1 text-2xl font-bold " +
-                      (done.room ? "text-brand-900" : "text-zinc-700")
-                    }
-                  >
-                    {done.room
-                      ? (done.room.split("-").pop() ?? done.room)
-                      : t("Unassigned")}
-                  </dd>
-                  <dd
-                    className={
-                      "mt-1 text-sm " +
-                      (done.room ? "text-brand-700" : "text-zinc-500")
-                    }
-                  >
+            {/* Stay receipt for the desk: guest, room and dates in one place
+                so staff can confirm without opening the reservation. */}
+            <div className="space-y-3 border-t border-zinc-100 pt-4 text-sm text-zinc-800">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-zinc-500">{t("Guest name")}</span>
+                <span className="font-medium">{form.guest_name || "-"}</span>
+              </div>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-zinc-500">{t("Phone")}</span>
+                <span className="font-medium">{form.phone || "-"}</span>
+              </div>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-zinc-500">{t("Room")}</span>
+                <span className="text-right font-medium">
+                  {done.room
+                    ? (done.room.split("-").pop() ?? done.room)
+                    : t("Unassigned")}
+                  <span className="mt-0.5 block text-xs font-normal text-zinc-500">
                     {roomTypeName || form.room_type}
                     {moreRooms.length > 0
                       ? ` · ${1 + moreRooms.reduce((s, r) => s + r.count, 0)} ${t("Rooms")}`
                       : ""}
-                  </dd>
-                </div>
-
-                <div>
-                  <dt className="text-xs font-medium text-zinc-400">{t("Check-in")}</dt>
-                  <dd className="mt-1 font-semibold text-zinc-900">
-                    {form.check_in_date}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs font-medium text-zinc-400">{t("Check-out")}</dt>
-                  <dd className="mt-1 font-semibold text-zinc-900">{checkOut}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs font-medium text-zinc-400">
-                    {dayUse ? t("Day use") : t("Nights")}
-                  </dt>
-                  <dd className="mt-1 font-semibold text-zinc-900">
-                    {dayUse ? `${slot.from}-${slot.to}` : form.nights}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs font-medium text-zinc-400">{t("Guests")}</dt>
-                  <dd className="mt-1 font-semibold text-zinc-900">
-                    {form.adults} {t("Adults")}
-                    {form.children > 0
-                      ? ` · ${form.children} ${t("Children")}`
-                      : ""}
-                  </dd>
-                </div>
-              </dl>
+                  </span>
+                </span>
+              </div>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-zinc-500">{t("Check-in")}</span>
+                <span className="font-medium">
+                  {form.check_in_date}
+                  {!dayUse && !walkIn && stayIn ? ` · ${stayIn}` : ""}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-zinc-500">{t("Check-out")}</span>
+                <span className="font-medium">
+                  {checkOut}
+                  {!dayUse && !walkIn && stayOut ? ` · ${stayOut}` : ""}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-zinc-500">
+                  {dayUse ? t("Day use") : t("Nights")}
+                </span>
+                <span className="font-medium">
+                  {dayUse ? `${slot.from}-${slot.to}` : form.nights}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-zinc-500">{t("Guests")}</span>
+                <span className="font-medium">
+                  {form.adults} {t("Adults")}
+                  {form.children > 0
+                    ? ` · ${form.children} ${t("Children")}`
+                    : ""}
+                </span>
+              </div>
             </div>
 
             {done.deposit && !done.walkIn && !done.waitlist && (
@@ -1325,6 +1380,7 @@ export function BookingDialog(props: {
                     value={form.room_type}
                     onChange={(e) => {
                       // a smaller room type leaves a party it cannot sleep
+                      autoRoomType.current = false
                       const rt = options?.room_types.find(
                         (x) => x.name === e.target.value,
                       )
@@ -1438,7 +1494,7 @@ export function BookingDialog(props: {
                   ))}
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className={"grid grid-cols-2 gap-3 " + (dayUse ? "sm:grid-cols-4" : "sm:grid-cols-5")}>
                   <Field label={t("Check-in")}>
                     <input
                       type="date"
@@ -1447,7 +1503,10 @@ export function BookingDialog(props: {
                       value={form.check_in_date}
                       readOnly={walkIn}
                       title={(walkIn ? t("A walk-in arrives today") : undefined)}
-                      onChange={(e) => set("check_in_date", e.target.value)}
+                      onChange={(e) => {
+                        setOutDraft(null)
+                        set("check_in_date", e.target.value)
+                      }}
                     />
                     {pastCheckIn && (
                       <p className="mt-1.5 text-xs text-rose-600">
@@ -1487,17 +1546,44 @@ export function BookingDialog(props: {
                       </Field>
                     </div>
                   ) : (
-                    <Field label={t("Nights")}>
-                      <input
-                        type="number"
-                        min={1}
-                        className={inputCls}
-                        value={form.nights}
-                        onChange={(e) =>
-                          set("nights", Math.max(1, Number(e.target.value)))
-                        }
-                      />
-                    </Field>
+                    <>
+                      <Field label={t("Check-out")}>
+                        <input
+                          type="date"
+                          className={inputCls}
+                          min={shiftDate(form.check_in_date || todayLocal(), 1)}
+                          value={outDraft ?? checkOut}
+                          onChange={(e) => {
+                            const v = e.target.value
+                            // keep a half-typed or too-early date in the box (it
+                            // blocks Confirm); only a date after check-in sets the nights
+                            if (!parseDate(v) || badDate || v <= form.check_in_date) {
+                              setOutDraft(v)
+                              return
+                            }
+                            setOutDraft(null)
+                            set("nights", Math.max(1, nightsBetween(form.check_in_date, v)))
+                          }}
+                        />
+                        {outError && (
+                          <p className="mt-1.5 text-xs text-rose-600">
+                            {t("Check-out must be after check-in.")}
+                          </p>
+                        )}
+                      </Field>
+                      <Field label={t("Nights")}>
+                        <input
+                          type="number"
+                          min={1}
+                          className={inputCls}
+                          value={form.nights}
+                          onChange={(e) => {
+                            setOutDraft(null)
+                            set("nights", Math.max(1, Number(e.target.value)))
+                          }}
+                        />
+                      </Field>
+                    </>
                   )}
                   <Field label={t("Adults")}>
                     <input
@@ -1530,6 +1616,30 @@ export function BookingDialog(props: {
                     />
                   </Field>
                 </div>
+
+                {!dayUse && !walkIn && (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <Field label={t("Arrival time")}>
+                      <input
+                        type="time"
+                        className={inputCls}
+                        value={stayIn}
+                        onChange={(e) => setStayTimes((x) => ({ ...x, from: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label={t("Departure time")}>
+                      <input
+                        type="time"
+                        className={inputCls}
+                        value={stayOut}
+                        onChange={(e) => setStayTimes((x) => ({ ...x, to: e.target.value }))}
+                      />
+                    </Field>
+                    <p className="col-span-2 self-end pb-2 text-xs text-zinc-500">
+                      {t("Standard times from the property. Change them for this booking if the guest agreed otherwise.")}
+                    </p>
+                  </div>
+                )}
 
                 {options?.property.pets_allowed ? (
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -1678,6 +1788,14 @@ export function BookingDialog(props: {
                     voucher={form.voucher_code || undefined}
                     ratePlan={form.rate_plan}
                     onPickPlan={(p) => set("rate_plan", p)}
+                    nightPrices={nightPrices}
+                    onNightPrices={setNightPrices}
+                    canSetPrice={canSetPrice}
+                    lockedNote={
+                      options?.can_set_rate && otaTotal > 0
+                        ? t("The OTA total sets the price, so nights cannot be priced one by one.")
+                        : undefined
+                    }
                   />
                 )}
 
@@ -2176,6 +2294,11 @@ export function BookingDialog(props: {
                                 ["valet_parking", "Valet parking"],
                                 ["early_checkin", "Early check-in"],
                                 ["late_checkout", "Late check-out"],
+                                ["needs_accessible", "Accessible room"],
+                                // a pair of connecting rooms needs a second room
+                                ...(moreRooms.length > 0
+                                  ? [["needs_connecting", "Connecting rooms"] as const]
+                                  : []),
                               ] as const
                             ).map(([k, lbl]) => (
                               <label
@@ -2492,7 +2615,7 @@ export function BookingDialog(props: {
                 <>
                 <Button
                   className="w-full justify-center py-2.5 text-base"
-                  disabled={busy || !form.guest_name || !quote || badDate || pastCheckIn || badPhone || badSlot || blacklistBlocked || creditBlocked || extraNeedsReason}
+                  disabled={busy || !form.guest_name || !quote || badDate || pastCheckIn || badPhone || badSlot || outDraft !== null || blacklistBlocked || creditBlocked || extraNeedsReason}
                   onClick={() => submit()}
                 >
                   {busy ? t("Booking…") : t("Confirm booking")}
@@ -2508,7 +2631,7 @@ export function BookingDialog(props: {
                   <Button
                     variant="outline"
                     className="justify-center"
-                    disabled={busy || !form.guest_name || badDate || pastCheckIn || badPhone || badSlot || blacklistBlocked || extraNeedsReason}
+                    disabled={busy || !form.guest_name || badDate || pastCheckIn || badPhone || badSlot || outDraft !== null || blacklistBlocked || extraNeedsReason}
                     onClick={() => submit(true)}
                     title={t("Park this stay with no room; promote when inventory frees")}
                   >

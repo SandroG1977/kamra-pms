@@ -623,7 +623,7 @@
         "kamra.api.collect_security_deposit"
        ]
       },
-      "description": "Take a refundable security deposit (villas: the damage deposit). Lands\non the guest folio as a Security Deposit payment and in the Deposit\nledger - a liability held for the guest, never revenue. Cashier PIN and\nopen till as for any payment.",
+      "description": "Take a refundable security deposit (villas: the damage deposit). Lands\non the guest folio as a Security Deposit payment and in the Deposit\nledger - a liability held for the guest, never revenue. Cashier PIN and\nopen till as for any payment.\n\nPass idempotency_key (one per Collect press): a retry with the same key\nreturns the first result instead of posting again.",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"reservation\": \"RES-2026-00001\",\n  \"amount\": 1000,\n  \"mode\": \"Cash\"\n}",
@@ -919,7 +919,7 @@
         "kamra.api.hk_update_task"
        ]
       },
-      "description": "Start or complete a housekeeping task from the phone.\n\nAn Inspection is completed by passing it: Done on an inspection is taken\nas Verified, which moves the room to Ready (inspection required by the\nturnover profile) or Inspected - never back to plain Clean. Verifying -\nan inspection or anyone's clean - is a supervisor's call, the same rule\nset_housekeeping_status applies to Inspected / Ready.",
+      "description": "Start or complete a housekeeping task from the phone.\n\n`expected` is the status the phone last saw - sent by a change queued\nduring an outage (#228). If the task moved on meanwhile it is refused,\nnever applied over someone else's change.\n\nAn Inspection is completed by passing it: Done on an inspection is taken\nas Verified, which moves the room to Ready (inspection required by the\nturnover profile) or Inspected - never back to plain Clean. Verifying -\nan inspection or anyone's clean - is a supervisor's call, the same rule\nset_housekeeping_status applies to Inspected / Ready.",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"task\": \"<task>\",\n  \"status\": \"<status>\"\n}",
@@ -1561,6 +1561,43 @@
      }
     },
     {
+     "name": "add_folio_payments",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.api.add_folio_payments",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.api.add_folio_payments"
+       ]
+      },
+      "description": "Record several payments in one request: one guest settling a bill\npart by cash, part by card, part by UPI.\n\n`payments` is a list of {folio, mode, amount, reference?, kind?,\nidempotency_key?}. Each row is posted exactly as add_folio_payment\nposts it (till, ledger, activity log), and all rows share one\ntransaction, so if any row is refused none is kept and the folio is\nnever left half-paid. Returns the folios touched and how many rows\nwere posted.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"payments\": \"<payments>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
      "name": "refund_folio_payment",
      "request": {
       "method": "POST",
@@ -1585,10 +1622,10 @@
         "kamra.api.refund_folio_payment"
        ]
       },
-      "description": "Give money back on an open folio - a held security deposit at\ncheckout, or an over-collected advance. Stored as a negative ledger\nrow so every balance still sums exactly; a reason is mandatory.",
+      "description": "Give money back on an open folio - a held security deposit at\ncheckout, or an over-collected advance. Stored as a negative ledger\nrow so every balance still sums exactly; a reason is mandatory.\n\npayment_row refunds against one payment line: mode defaults to that\npayment's mode (pass Cash to give cash back instead) and amount to what\nis left of it. A retry with the same idempotency_key returns the first\nrefund instead of paying out twice.",
       "body": {
        "mode": "raw",
-       "raw": "{\n  \"folio\": \"FOLIO-2026-00001\",\n  \"amount\": 1000,\n  \"mode\": \"<mode>\",\n  \"reason\": \"<reason>\"\n}",
+       "raw": "{\n  \"folio\": \"FOLIO-2026-00001\",\n  \"amount\": 1000,\n  \"reason\": \"\"\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -1659,10 +1696,47 @@
         "kamra.api.void_folio_charge"
        ]
       },
-      "description": "Remove a wrong charge line from an open folio (the bill-correction\npath). PIN-guarded like other money actions for humans; agents are\naccountable through the action log. Posts a ledger reversal.",
+      "description": "Remove a wrong charge line from an open folio (the bill-correction\npath): the line stays and a signed reversal line with the reason and\nuser follows it (folio.void_charge). PIN-guarded like other money\nactions for humans; agents are accountable through the action log.",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"folio\": \"FOLIO-2026-00001\",\n  \"charge_row\": \"<charge_row>\",\n  \"reason\": \"\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "correct_folio_charge",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.api.correct_folio_charge",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.api.correct_folio_charge"
+       ]
+      },
+      "description": "Correct a posted line on an open folio without editing it: a reversal\nof the original and a repost with the right amount, tax rate or charge\ntype, both linked to the original (corrects_row). Same roles, PIN and\nVoid reason codes as void_folio_charge. A retry with the same\nidempotency_key returns the first correction.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"folio\": \"FOLIO-2026-00001\",\n  \"charge_row\": \"<charge_row>\",\n  \"reason\": \"\",\n  \"amount\": 1000\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -2029,10 +2103,10 @@
         "kamra.api.transfer_folio_charges"
        ]
       },
-      "description": "Bulk move: several charge lines to another folio of the stay.",
+      "description": "Move charge lines off one open folio, ledger and all. Give one target:\nto_folio (another folio of the same stay or group), to_company=1 (the\nstay's Company folio, opened if needed) or to_reservation (the open Guest\nfolio of another in-house stay here; Finance or Hotel Admin, with a\nreason). A retry with the same idempotency_key returns the first move.",
       "body": {
        "mode": "raw",
-       "raw": "{\n  \"from_folio\": \"<from_folio>\",\n  \"charge_rows\": \"<charge_rows>\",\n  \"to_folio\": \"<to_folio>\"\n}",
+       "raw": "{\n  \"from_folio\": \"<from_folio>\",\n  \"charge_rows\": \"<charge_rows>\",\n  \"to_company\": 0\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -2436,7 +2510,7 @@
         "kamra.api.close_folio"
        ]
       },
-      "description": "",
+      "description": "Close a settled folio and issue its invoice number.\n\nThe Guest folio of a stay that is still checked in stays open, so\ntonight's charges and the night audit have a bill to post to. Invoice\nwhat is already paid with part_settle_folio (Settle & continue stay).\nAny other folio, including a company folio, can still close while the\nguest is in house.",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"folio\": \"FOLIO-2026-00001\"\n}",
@@ -2769,7 +2843,7 @@
         "kamra.api.folio_invoice"
        ]
       },
-      "description": "Everything the bill needs to print itself.\n\nA tax invoice is a legal document, not a screenshot of a table: the\nservice code belongs on each LINE (a room night, a restaurant cover\nand a laundry bag are three different supplies), the tax has to be\nnamed the way the country names it, the total has to appear in words,\nand the guest wants a summary by what they bought before they read\nforty lines. All of that is assembled here so every surface that\nprints a bill - the folio screen, a PDF, an email - agrees.",
+      "description": "Everything the bill needs to print itself.\n\nA tax invoice is a legal document, not a screenshot of a table: the\nservice code belongs on each LINE (a room night, a restaurant cover\nand a laundry bag are three different supplies), the tax has to be\nnamed the way the country names it, the total has to appear in words,\nand the guest wants a summary by what they bought before they read\nforty lines. All of that is assembled here so every surface that\nprints a bill - the folio screen, a PDF, an email - agrees.\n\nStatement fields (stable for integrations):\n\n- `lines`: each charge line: row, posting_date, stay_date,\n  charge_type, description, qty, rate, amount (pre-tax), gst_rate,\n  gst_amount, total, service_code, transaction_code, gl_code (as\n  posted), corrects_row (a correction's original line), reservation,\n  is_alcohol, auto_posted\n- `payments`: row, posting_date, payment_kind, mode, amount (refunds\n  negative), reference, currency, fx_amount, exchange_rate,\n  transaction_code, gl_code, refund_of (the payment a refund is against)\n- `statement`: lines and payments in date order: date, row, kind\n  (Charge or the payment kind), charge_type, description, reference,\n  method, transaction_code, gl_code, charges, credits, tax, balance\n  (running)\n- `tax_summary`: per rate, taxable, total_tax and the country's parts\n- `allocations`: company payments that cleared this bill: payment,\n  account, posting_date, reference, amount\n- `folio`, `bill_to`, `guest`, `stay`, `property`, `document`",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"folio\": \"FOLIO-2026-00001\"\n}",
@@ -2945,7 +3019,7 @@
         "kamra.api.guest_alert"
        ]
       },
-      "description": "Is the guest a booking would attach to blacklisted? The desk asks\nbefore booking so the warning shows up front, not as a refusal at the\nend. Resolves exactly like create_booking: the chosen profile, else the\nprofile with this phone number.",
+      "description": "Is the guest a booking would attach to blacklisted? The desk asks\nbefore booking so the warning shows up front, not as a refusal at the\nend. The chosen profile, else the profile with this phone number (which\ncreate_booking reuses only when the typed name matches too).",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"guest\": \"G-00001\",\n  \"phone\": \"+91 90000 00000\"\n}",
@@ -3602,7 +3676,7 @@
         "kamra.api.walk_in"
        ]
       },
-      "description": "Walk-in in one step: book, register the ID, check into the chosen\nroom and take the money - the counter flow that used to be four screens.\n\ndefer_check_in=1 books, assigns the room and takes the money (as an\nadvance) but leaves the stay Confirmed, so the desk finishes it in the\nguided check-in. Without it, check_in runs now (room is enough; other\nsoft-required steps stay as backfill). The walk-in records the steps it\ndoes itself (room, who pays, the ID when given).\n\nIt is the same writers chained (create_booking \u2192 check_in \u2192\nadd_folio_payment), inside one request, so it is all-or-nothing: a\nrefused PIN or a room that just sold rolls the booking back too.\nArrival is always today (calendar, like every new booking - a lagging\nnight audit must not turn walk-ins away); a future stay is a normal\nbooking, not a walk-in.\n\nAn OTA guest who books and arrives the same day is a walk-in booked\nvia that site: booked_via / ota_ref / ota_total / ota_commission_pct\nwork as in create_booking (the stay's source is then OTA).",
+      "description": "Walk-in in one step: book, register the ID, check into the chosen\nroom and take the money - the counter flow that used to be four screens.\n\ndefer_check_in=1 books, assigns the room and takes the money (as an\nadvance) but leaves the stay Confirmed, so the desk finishes it in the\nguided check-in. Without it, check_in runs now (room is enough; other\nsoft-required steps stay as backfill). The walk-in records the steps it\ndoes itself (room, who pays, the ID when given).\n\nIt is the same writers chained (create_booking \u2192 check_in \u2192\nadd_folio_payment), inside one request, so it is all-or-nothing: a\nrefused PIN or a room that just sold rolls the booking back too.\nArrival is always today (calendar, like every new booking - a lagging\nnight audit must not turn walk-ins away); a future stay is a normal\nbooking, not a walk-in.\n\nAn OTA guest who books and arrives the same day is a walk-in booked\nvia that site: booked_via / ota_ref / ota_total / ota_commission_pct\nwork as in create_booking (the stay's source is then OTA). night_prices\nbooks nights at the desk's own prices, as in create_booking.",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"property\": \"Your Property\",\n  \"room_type\": \"Your Property-DLX\",\n  \"room\": \"Your Property-101\",\n  \"check_out_date\": \"2026-08-03\",\n  \"guest_name\": \"A. Guest\",\n  \"phone\": \"+91 90000 00000\",\n  \"guest\": \"G-00001\",\n  \"adults\": 2,\n  \"children\": 0,\n  \"payment_amount\": 0,\n  \"defer_check_in\": 0,\n  \"ota_total\": 0\n}",
@@ -3837,6 +3911,43 @@
      }
     },
     {
+     "name": "reverse_check_in",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.api.reverse_check_in",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.api.reverse_check_in"
+       ]
+      },
+      "description": "Undo a check-in made by mistake (wrong guest, wrong room), the same\nbusiness day and before anything is posted or paid. The stay goes back\nto Confirmed (arrival) with its room; the room is released and marked\nDirty so housekeeping inspects it before it is sold again. From there\nthe desk checks the guest in again or cancels the booking.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"reservation\": \"RES-2026-00001\",\n  \"reason\": \"<reason>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
      "name": "reinstate_checkout",
      "request": {
       "method": "POST",
@@ -3972,7 +4083,7 @@
         "kamra.api.set_housekeeping_status"
        ]
       },
-      "description": "Change a room's housekeeping status - role, property and DocPerm\nchecked (#99): an attendant can mark Clean / Dirty, only a supervisor\ncan pass a room or take it out of order, nobody can touch a room of a\nproperty they aren't assigned to, and removing Write on Room in the\nrole permissions actually removes the ability.",
+      "description": "Change a room's housekeeping status - role, property and DocPerm\nchecked (#99): an attendant can mark Clean / Dirty, only a supervisor\ncan pass a room or take it out of order, nobody can touch a room of a\nproperty they aren't assigned to, and removing Write on Room in the\nrole permissions actually removes the ability. `expected` (a change\nqueued offline, #228): refused if the room's status moved on since.",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"room\": \"Your Property-101\",\n  \"status\": \"<status>\"\n}",
@@ -4120,7 +4231,7 @@
         "kamra.api.send_precheckin_link"
        ]
       },
-      "description": "Send the guest their self check-in link (mints a token if needed). Sends\nover a connected channel when there is one; otherwise returns the link for\nthe desk to share. Marks when it went out so the arrivals board can show it.",
+      "description": "Send the guest their self check-in link (mints a token if needed). Sends\nover a connected channel when there is one; otherwise returns the link for\nthe desk to share. Marks when it went out so the arrivals board can show it;\na link nobody was sent is not marked.",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"reservation\": \"RES-2026-00001\",\n  \"channel\": \"WhatsApp\"\n}",
@@ -4157,7 +4268,7 @@
         "kamra.api.set_stay_times"
        ]
       },
-      "description": "Set the planned arrival (ETA) and departure (ETD) times for any stay.\nThese drive the hotel-position view on the tape chart: back-to-back\nrooms conflict when the incoming guest lands before the outgoing one\nleaves, and the day's arrival flow is planned around them.",
+      "description": "Set the planned arrival (ETA) and departure (ETD) times for any stay.\nThese drive the hotel-position view on the tape chart: back-to-back\nrooms conflict when the incoming guest lands before the outgoing one\nleaves, and the day's arrival flow is planned around them.\n\nOn a day-use stay the times also re-price an hourly or block rate plan\n(same write path as booking \u2014 Reservation.save \u2192 apply_pricing).",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"reservation\": \"RES-2026-00001\"\n}",
@@ -4198,6 +4309,43 @@
       "body": {
        "mode": "raw",
        "raw": "{\n  \"reservation\": \"RES-2026-00001\",\n  \"from_time\": \"<from_time>\",\n  \"to_time\": \"<to_time>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "occupancy_on_books",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.api.occupancy_on_books",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.api.occupancy_on_books"
+       ]
+      },
+      "description": "Occupancy on the books per night, start_date to end_date (both\nnights included, at most 90): confirmed and in-house reservations over\nall rooms, as pricing's hurdle tiers see it. Rooms on the books, not a\nforecast.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"start_date\": \"2026-08-01\",\n  \"end_date\": \"2026-08-31\"\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -4749,7 +4897,7 @@
         "kamra.api.get_quote"
        ]
       },
-      "description": "Price a stay. With a company and no rate plan, the company's\nnegotiated plan applies - the same plan create_booking stores.",
+      "description": "Price a stay. With a company and no rate plan, the company's\nnegotiated plan applies - the same plan create_booking stores.\ncheck_in_time / check_out_time price an hourly or block day-use plan.\n\nnight_prices ([{date, price}], a Revenue Manager / Hotel Admin only)\nprices those nights at the typed figure - tax included when the\nproperty's rates include tax - and the rest at the rate card. A voucher,\nrate plan, long-stay discount or holiday package with typed nights is\nrefused.",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"property\": \"Your Property\",\n  \"room_type\": \"Your Property-DLX\",\n  \"check_in_date\": \"2026-08-01\",\n  \"check_out_date\": \"2026-08-03\",\n  \"adults\": 2,\n  \"children\": 0,\n  \"over_capacity_charge\": 0,\n  \"pets\": 0\n}",
@@ -4786,7 +4934,7 @@
         "kamra.api.create_booking"
        ]
       },
-      "description": "One-call booking: attach to an existing guest profile when given,\nelse dedup by phone / create one. Optional auto room assignment,\nvoucher applied, price computed by the engine.\n\nwaitlist=1 parks the stay with no room and status Waitlist - for dates\nthat are sold out or restricted; promote it later when a room frees.\n\nstatus / idempotency_key / hold_expires_on support Instant public booking\n(ADR-006 / ADR-007). Desk callers leave them unset \u2192 Confirmed.\n\nDay use: check_out_date == check_in_date books a same-day stay, priced\nby the quote engine (one billable date). check_in_time / check_out_time\n(HH:MM) are its slot - they place it on the hourly tape and tell\nhousekeeping when the room turns; on an overnight stay they are the\nETA / ETD.\n\nA stay billed to a company on credit runs the property's credit control\n(kamra.credit) for its amount: a warning comes back as `credit_warning`;\na block refuses (CREDIT_BLOCKED) unless Finance or a Hotel Admin passes\n`credit_override_reason`, which is logged. Agents can't override.",
+      "description": "One-call booking: attach to an existing guest profile when given,\nelse reuse a profile whose phone and full name both match (a\nblacklisted phone always resolves to its profile) / create one.\nOptional auto room assignment,\nvoucher applied, price computed by the engine.\n\nwaitlist=1 parks the stay with no room and status Waitlist - for dates\nthat are sold out or restricted; promote it later when a room frees.\n\nstatus / idempotency_key / hold_expires_on support Instant public booking\n(ADR-006 / ADR-007). Desk callers leave them unset \u2192 Confirmed.\n\nDay use: check_out_date == check_in_date books a same-day stay, priced\nby the quote engine (one billable date). check_in_time / check_out_time\n(HH:MM) are its slot - they place it on the hourly tape and tell\nhousekeeping when the room turns; on an overnight stay they are the\nETA / ETD.\n\nA stay billed to a company on credit runs the property's credit control\n(kamra.credit) for its amount: a warning comes back as `credit_warning`;\na block refuses (CREDIT_BLOCKED) unless Finance or a Hotel Admin passes\n`credit_override_reason`, which is logged. Agents can't override.\n\nnight_prices ([{date, price}]) books those nights at the figure the desk\nagreed (tax included when the property's rates include tax) and the rest\nat the rate card; the booking is then priced by hand (auto_price off),\neach typed night is locked in night_rates and logged. Only a Revenue\nManager or Hotel Admin may; a voucher, rate plan, company plan, OTA\ntotal or group block rate with typed nights is refused.",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"property\": \"Your Property\",\n  \"room_type\": \"Your Property-DLX\",\n  \"check_in_date\": \"2026-08-01\",\n  \"check_out_date\": \"2026-08-03\",\n  \"guest_name\": \"A. Guest\",\n  \"phone\": \"+91 90000 00000\",\n  \"adults\": 2,\n  \"children\": 0,\n  \"booking_type\": \"Individual\",\n  \"source\": \"Manual\",\n  \"assign_room\": 1,\n  \"guest\": \"G-00001\",\n  \"waitlist\": 0,\n  \"room\": \"Your Property-101\",\n  \"over_capacity_guests\": 0,\n  \"over_capacity_charge\": 0,\n  \"pets\": 0,\n  \"ota_total\": 0,\n  \"marketing_consent\": 0\n}",
@@ -4934,7 +5082,7 @@
         "kamra.api.create_group_booking"
        ]
       },
-      "description": "Create a Group Booking plus one reservation per requested room.\n`rooms` = [{\"room_type\": <name>, \"count\": 2, \"room\": <optional>,\n\"guest_name\": <optional>}, ...] (JSON string ok).\n\n`master_index` picks the main room (the index of the room as expanded\nby count, default the first): its guest pays what `master_pays` covers\n(a key of folio.COMPANY_BILLING_DEFAULTS, default \"Room only\") for every\nroom on one group bill. If that room could not be booked, the next one\nmade is the main room. Pass neither to keep a plain group.\n\nBooked via an OTA (see create_booking): every room carries the site and\nthe one OTA reference, and the sold total (`ota_total`, tax included) is\nsplit across the rooms in proportion to their rate-card prices, each\nroom locked to its share.",
+      "description": "Create a Group Booking plus one reservation per requested room.\n`stay_details` (as in create_booking, e.g. needs_connecting) goes on\nevery room.\n`rooms` = [{\"room_type\": <name>, \"count\": 2, \"room\": <optional>,\n\"guest_name\": <optional>, \"night_prices\": <optional>}, ...] (JSON string\nok). A row's `night_prices` ([{date, price}], as in create_booking) price\nthat row's rooms night by night; every row keeps its own.\n\n`master_index` picks the main room (the index of the room as expanded\nby count, default the first): its guest pays what `master_pays` covers\n(a key of folio.COMPANY_BILLING_DEFAULTS, default \"Room only\") for every\nroom on one group bill. If that room could not be booked, the next one\nmade is the main room. Pass neither to keep a plain group.\n\nBooked via an OTA (see create_booking): every room carries the site and\nthe one OTA reference, and the sold total (`ota_total`, tax included) is\nsplit across the rooms in proportion to their rate-card prices, each\nroom locked to its share.",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"property\": \"Your Property\",\n  \"group_name\": \"<group_name>\",\n  \"check_in_date\": \"2026-08-01\",\n  \"check_out_date\": \"2026-08-03\",\n  \"rooms\": \"<rooms>\",\n  \"guest_name\": \"A. Guest\",\n  \"phone\": \"+91 90000 00000\",\n  \"ota_total\": 0\n}",
@@ -5082,10 +5230,10 @@
         "kamra.api.available_rooms"
        ]
       },
-      "description": "Rooms of a type with no overlapping live reservation - the same\nlogic the double-booking guard enforces, exposed as a query. Confirmed\ngroup blocks hold their unsold rooms out of general sale; pass the\ngroup to book against its own block.\n\nA stay may start on another's departure date, so a room whose guest\ndeparts today is \"free\" for a booking. Pass ready_now=1 when the guest\nis being put in the room now (check-in, walk-in, allocation for today):\na room whose occupant is still Checked In is then left out until they\ncheck out - the same rule Reservation.validate_room_vacant enforces.",
+      "description": "Rooms of a type with no overlapping live reservation - the same\nlogic the double-booking guard enforces, exposed as a query. Confirmed\ngroup blocks hold their unsold rooms out of general sale; pass the\ngroup to book against its own block.\n\nA stay may start on another's departure date, so a room whose guest\ndeparts today is \"free\" for a booking. Pass ready_now=1 when the guest\nis being put in the room now (check-in, walk-in, allocation for today):\na room whose occupant is still Checked In is then left out until they\ncheck out - the same rule Reservation.validate_room_vacant enforces.\n\naccessible=1 keeps only rooms marked Accessible (#536).",
       "body": {
        "mode": "raw",
-       "raw": "{\n  \"property\": \"Your Property\",\n  \"room_type\": \"Your Property-DLX\",\n  \"check_in_date\": \"2026-08-01\",\n  \"check_out_date\": \"2026-08-03\",\n  \"ready_now\": 0\n}",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"room_type\": \"Your Property-DLX\",\n  \"check_in_date\": \"2026-08-01\",\n  \"check_out_date\": \"2026-08-03\",\n  \"ready_now\": 0,\n  \"accessible\": 0\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -5456,6 +5604,43 @@
       "body": {
        "mode": "raw",
        "raw": "{\n  \"group_booking\": \"<group_booking>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "bulk_stays",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.api.bulk_stays",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.api.bulk_stays"
+       ]
+      },
+      "description": "Check in, check out or cancel several stays at once (a group, a busy\nmorning). Each stay goes through the same call as one at a time -\ncheck_in, check_out, cancel_reservation - with its own roles, property\nscope and checks, in its own savepoint: one that fails is rolled back\nand reported with why, and the rest go on. Returns\n{\"results\": [{\"reservation\", \"done\": 1, ...} | {\"reservation\", \"error\"}]}.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"action\": \"<action>\",\n  \"reservations\": \"<reservations>\",\n  \"reason\": \"Guest request\"\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -6899,7 +7084,7 @@
       "description": "A captain's new bill straight to the kitchen, in one call: what\ncreate_order, apply_discount, confirm_order and fire_kot do one after\nanother, in one request and one transaction. The till waits for one\nround trip instead of four, and the kitchen gets a single update.",
       "body": {
        "mode": "raw",
-       "raw": "{\n  \"outlet\": \"Your Property-Restaurant\",\n  \"items\": \"<items>\",\n  \"property\": \"Your Property\",\n  \"room\": \"Your Property-101\",\n  \"reservation\": \"RES-2026-00001\",\n  \"customer_name\": \"A. Customer\",\n  \"discount\": 0,\n  \"discount_reason\": \"\",\n  \"guest\": \"G-00001\"\n}",
+       "raw": "{\n  \"outlet\": \"Your Property-Restaurant\",\n  \"items\": \"<items>\",\n  \"property\": \"Your Property\",\n  \"room\": \"Your Property-101\",\n  \"reservation\": \"RES-2026-00001\",\n  \"customer_name\": \"A. Customer\",\n  \"discount\": 0,\n  \"discount_reason\": \"\",\n  \"guest\": \"G-00001\",\n  \"allow_zero\": 0\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -6936,7 +7121,7 @@
       "description": "Another round on a running bill, straight to the kitchen: add_items\nand fire_kot in one call and one save.",
       "body": {
        "mode": "raw",
-       "raw": "{\n  \"order\": \"ORD-2026-00001\",\n  \"items\": \"<items>\"\n}",
+       "raw": "{\n  \"order\": \"ORD-2026-00001\",\n  \"items\": \"<items>\",\n  \"allow_zero\": 0\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -9430,6 +9615,196 @@
    ]
   },
   {
+   "name": "Housekeeping (room status cases, inspection pass rate)",
+   "item": [
+    {
+     "name": "room_discrepancies",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.housekeeping.room_discrepancies",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.housekeeping.room_discrepancies"
+       ]
+      },
+      "description": "Rooms where the front office and housekeeping disagree now (the night\naudit's room status check) that have no open case yet, and the open\ncases with their owner.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "open_room_discrepancy",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.housekeeping.open_room_discrepancy",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.housekeeping.open_room_discrepancy"
+       ]
+      },
+      "description": "Open a case for a room the front office and housekeeping disagree on,\nwith an owner (default: whoever opens it). One open case per room.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"room\": \"Your Property-101\",\n  \"note\": \"\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "close_room_discrepancy",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.housekeeping.close_room_discrepancy",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.housekeeping.close_room_discrepancy"
+       ]
+      },
+      "description": "Close a room status case with what was found (the reason is required).",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"case\": \"<case>\",\n  \"reason\": \"<reason>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "hk_fail_inspection",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.housekeeping.hk_fail_inspection",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.housekeeping.hk_fail_inspection"
+       ]
+      },
+      "description": "A supervisor fails an inspection: the room goes back to Dirty and a\nre-clean is handed to the attendant whose clean failed. The reason is\nkept; it counts against that attendant's pass rate.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"task\": \"<task>\",\n  \"reason\": \"<reason>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "hk_quality",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.housekeeping.hk_quality",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.housekeeping.hk_quality"
+       ]
+      },
+      "description": "Inspection pass rate and checkout-clean turn time (task made to task\ndone, in minutes) by attendant and by room type, over inspections and\ncleans completed between the dates (default: the last 30 days).",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"from_date\": \"2026-08-01\",\n  \"to_date\": \"2026-08-31\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
    "name": "Banquets (functions, quotations, event orders)",
    "item": [
     {
@@ -11396,6 +11771,825 @@
    ]
   },
   {
+   "name": "Recreation (gym, pool, spa: visits, memberships, bookings, passes)",
+   "item": [
+    {
+     "name": "desk",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.desk",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.desk"
+       ]
+      },
+      "description": "Facilities, who is inside, plans and customers for the desk.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "save_facility",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.save_facility",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.save_facility"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"facility_name\": \"<facility_name>\",\n  \"category\": \"Gym\",\n  \"capacity\": 1,\n  \"access\": \"Both\",\n  \"price\": 0,\n  \"status\": \"Open\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "save_plan",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.save_plan",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.save_plan"
+       ]
+      },
+      "description": "`facilities` (a list) is the access the plan gives: those facilities\nonly. Leave it and `facility` blank for every facility.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"plan_name\": \"<plan_name>\",\n  \"period\": \"Month\",\n  \"price\": 0,\n  \"visit_limit\": 0\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "register_customer",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.register_customer",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.register_customer"
+       ]
+      },
+      "description": "An external customer. This is not a hotel guest and not a stay.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"full_name\": \"A. Guest\",\n  \"phone\": \"+91 90000 00000\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "sell_membership",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.sell_membership",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.sell_membership"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"customer\": \"<customer>\",\n  \"plan\": \"<plan>\",\n  \"paid\": 1,\n  \"mode\": \"Cash\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "renew_membership",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.renew_membership",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.renew_membership"
+       ]
+      },
+      "description": "The same plan again, from the day after this one ends (or today,\nwhen it has already lapsed).",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"membership\": \"<membership>\",\n  \"paid\": 1,\n  \"mode\": \"Cash\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "check_in",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.check_in",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.check_in"
+       ]
+      },
+      "description": "One person into a facility. In-house guests are a reservation that\nis checked in. External customers are a recreation customer, usually\non a membership. Capacity and hours are enforced. A walk-in pays by\n`mode` (Cash by default) into the till.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"facility\": \"<facility>\",\n  \"reservation\": \"RES-2026-00001\",\n  \"complimentary\": 0,\n  \"mode\": \"Cash\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "check_out",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.check_out",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.check_out"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"visit\": \"<visit>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "revenue",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.revenue",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.revenue"
+       ]
+      },
+      "description": "What the desk took on one day: folio, cash and membership fees.\nCash and membership fees are operational totals. Folio amounts are\nalso on the guest bill.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"date\": \"2026-08-01\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "facility_slots",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.facility_slots",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.facility_slots"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"facility\": \"<facility>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "book",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.book",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.book"
+       ]
+      },
+      "description": "Book a treatment (with a therapist, in a treatment room) or a pool /\ncourt session. The end comes from the treatment's minutes or the\nfacility's session minutes unless given.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"facility\": \"<facility>\",\n  \"starts_at\": \"<starts_at>\",\n  \"reservation\": \"RES-2026-00001\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "arrive",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.arrive",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.arrive"
+       ]
+      },
+      "description": "The booked guest or customer is here: it becomes a visit, paid like\none (the treatment's price, else the facility's).",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"booking\": \"<booking>\",\n  \"complimentary\": 0,\n  \"mode\": \"Cash\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "cancel_booking",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.cancel_booking",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.cancel_booking"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"booking\": \"<booking>\",\n  \"no_show\": 0\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "bookings",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.bookings",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.bookings"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "save_treatment",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.save_treatment",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.save_treatment"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"treatment_name\": \"<treatment_name>\",\n  \"duration\": 60,\n  \"price\": 0,\n  \"disabled\": 0\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "save_therapist",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.save_therapist",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.save_therapist"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"therapist_name\": \"<therapist_name>\",\n  \"disabled\": 0\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "spa_setup",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.spa_setup",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.spa_setup"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "entry_pass",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.entry_pass",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.entry_pass"
+       ]
+      },
+      "description": "A member's or an in-house guest's pass: the code and its QR (data URI).",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"reservation\": \"RES-2026-00001\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "check_in_by_pass",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.check_in_by_pass",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.check_in_by_pass"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"facility\": \"<facility>\",\n  \"code\": \"<code>\",\n  \"complimentary\": 0\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "receipt",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.receipt",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.receipt"
+       ]
+      },
+      "description": "A walk-in's or a membership's receipt: the record's number is the\nreceipt number. An operational receipt, not a tax invoice.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"<name>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "report",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.report",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.report"
+       ]
+      },
+      "description": "Attendance, memberships, revenue by facility and by customer type,\nand hotel-guest against outside use, for a date range (default: this\nmonth so far).",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"from_date\": \"2026-08-01\",\n  \"to_date\": \"2026-08-31\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "membership_ledger",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.recreation.membership_ledger",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.recreation.membership_ledger"
+       ]
+      },
+      "description": "Everything one customer bought and used, oldest first: each\nmembership (and renewal) with its fee, each visit against it with the\nvisits left, and what they paid at the desk.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"customer\": \"<customer>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
    "name": "Migration (CSV import)",
    "item": [
     {
@@ -12822,6 +14016,196 @@
    ]
   },
   {
+   "name": "AI guest booking (guest.booking scope)",
+   "item": [
+    {
+     "name": "search",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.guest_booking.search",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.guest_booking.search"
+       ]
+      },
+      "description": "Room types free for the stay, each with the real quoted total per\nmeal plan and what is due now under the property's payment policy.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"check_in_date\": \"2026-08-01\",\n  \"check_out_date\": \"2026-08-03\",\n  \"adults\": 2,\n  \"children\": 0\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "hold",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.guest_booking.hold",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.guest_booking.hold"
+       ]
+      },
+      "description": "Book the stay for the guest. Pay-at-hotel properties confirm it at\nonce; with an advance due it is held (Pending Payment) until\nhold_expires_on - send the payment link before then.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"room_type\": \"Your Property-DLX\",\n  \"check_in_date\": \"2026-08-01\",\n  \"check_out_date\": \"2026-08-03\",\n  \"guest_name\": \"A. Guest\",\n  \"phone\": \"+91 90000 00000\",\n  \"email\": \"guest@example.com\",\n  \"adults\": 2,\n  \"children\": 0,\n  \"meal_plan\": \"\",\n  \"special_requests\": \"\",\n  \"voucher_code\": \"\",\n  \"idempotency_key\": \"\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "payment_link",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.guest_booking.payment_link",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.guest_booking.payment_link"
+       ]
+      },
+      "description": "A payment link for the advance still due on this booking.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"reservation\": \"RES-2026-00001\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "confirm",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.guest_booking.confirm",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.guest_booking.confirm"
+       ]
+      },
+      "description": "Confirm the booking - only once the property's policy is met: the\nadvance is paid, or nothing was due now. Never on the model's say-so.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"reservation\": \"RES-2026-00001\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "status",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.guest_booking.status",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.guest_booking.status"
+       ]
+      },
+      "description": "Where a booking this connection made stands.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"reservation\": \"RES-2026-00001\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
    "name": "Dashboards",
    "item": [
     {
@@ -13015,6 +14399,80 @@
      }
     },
     {
+     "name": "business_date",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.reports.business_date",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.reports.business_date"
+       ]
+      },
+      "description": "The property's open business date (the day the night audit closes\nnext) and the calendar date, so a connected app dates what it posts.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "kpi_snapshots",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.reports.kpi_snapshots",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.reports.kpi_snapshots"
+       ]
+      },
+      "description": "The daily KPI snapshots of closed business dates from_date..to_date\n(both included, at most 366 days), oldest first. A date with no\nsnapshot (not closed yet, or closed before snapshots existed) is\nabsent, never estimated.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"from_date\": \"2026-08-01\",\n  \"to_date\": \"2026-08-31\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
      "name": "budget_vs_actual",
      "request": {
       "method": "POST",
@@ -13151,6 +14609,43 @@
        ]
       },
       "description": "Operations SLA health from Service Tickets over a window: overall\nresolution and breach rates, a breakdown by category and by priority,\nand the currently-overdue queue aged by how long it's past its due time.\n\nTime-to-resolve is measured creation -> resolved_on; a ticket counts as\nbreached if it was resolved after due_by, or is still open past due_by.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"from_date\": \"2026-08-01\",\n  \"to_date\": \"2026-08-31\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "booking_link_sources",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.reports.booking_link_sources",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.reports.booking_link_sources"
+       ]
+      },
+      "description": "Bookings made from booking links, per source tag (#560): how many,\nroom nights and booked value, by the date the booking was made\n(default: the last 90 days). Cancelled bookings are left out.",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"property\": \"Your Property\",\n  \"from_date\": \"2026-08-01\",\n  \"to_date\": \"2026-08-31\"\n}",
@@ -13585,6 +15080,43 @@
      }
     },
     {
+     "name": "ledger_detail",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.ledger.ledger_detail",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.ledger.ledger_detail"
+       ]
+      },
+      "description": "The drill-down under a ledger card: every folio with a balance in that\nledger as of the date (guest, booking, status, company), biggest first.\nFor AR the company the bill is billed to comes with it.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"ledger\": \"<ledger>\",\n  \"business_date\": \"2026-08-01\",\n  \"limit\": 2000\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
      "name": "journal_by_transaction_code",
      "request": {
       "method": "POST",
@@ -13609,10 +15141,10 @@
         "kamra.ledger.journal_by_transaction_code"
        ]
       },
-      "description": "",
+      "description": "Ledger postings summed by transaction code: for one business date, or\nfrom_date to to_date (both inclusive) when a range is given.",
       "body": {
        "mode": "raw",
-       "raw": "{\n  \"property\": \"Your Property\",\n  \"business_date\": \"2026-08-01\"\n}",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"business_date\": \"2026-08-01\",\n  \"from_date\": \"2026-08-01\",\n  \"to_date\": \"2026-08-31\"\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -13720,10 +15252,121 @@
         "kamra.ledger.city_ledger_settle"
        ]
       },
-      "description": "Record a company's payment against its city ledger account and clear\nthe AR it pays. By default it pays the oldest open bills first;\n`allocations` ([{folio, amount}]) names the folios instead. Any excess\nstays on the account as unapplied credit and settles the company's next\nbill.",
+      "description": "Record a company's payment against its city ledger account and clear\nthe AR it pays.\n\n`withholdings` ([{folio, amount, tax, rate?, certificate_number?,\ncertificate_period?}], #521) is tax the company kept back from named\nbills: it clears that part of each bill too and is tracked as tax\nwithheld until its certificate arrives (kamra.receivables). `tax` is a\ncode from the country pack's withholding taxes. By default it pays the oldest open bills first;\n`allocations` ([{folio, amount}]) names the folios instead. Any excess\nstays on the account as unapplied credit and settles the company's next\nbill. `received_on` is the date the money arrived (the business date\nwhen left out, never later).\n\nAn AI agent's payment is not posted: it waits as a Company Payment\nRequest ({\"pending\": True, ...}) until Finance confirms it with a PIN\n(decide_city_ledger_payment). With the property's \"PIN on company\npayments\" setting on, a desk payment asks for the user's PIN too.\n\nPass idempotency_key (one per \"Record payment\" press): a retry with the\nsame key returns the first result and posts nothing. Two payments on\none account at once run one after the other, so they never both clear\nthe same bill.",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"account\": \"<account>\",\n  \"amount\": 1000,\n  \"mode\": \"Bank Transfer\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "decide_city_ledger_payment",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.ledger.decide_city_ledger_payment",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.ledger.decide_city_ledger_payment"
+       ]
+      },
+      "description": "Confirm or reject a company payment an agent recorded. Confirming\nneeds the Finance user's own PIN every time and posts exactly what was\nproposed: the amount, mode, reference, received date and the bills it\nclears. If one of those bills was paid since, it is refused; reject it\nand record the payment again. A rejection needs a note. AI agents never\ndecide.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"request\": \"<request>\",\n  \"approve\": 1,\n  \"note\": \"\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "reverse_city_ledger_payment",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.ledger.reverse_city_ledger_payment",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.ledger.reverse_city_ledger_payment"
+       ]
+      },
+      "description": "Undo a company payment: a bounced cheque, or money put on the wrong\naccount. Posts the opposite AR leg for every bill the payment cleared\n(those bills are owed again, with their old due dates), takes back any\ncredit it left unapplied, and logs the reason. A payment is reversed\nonce; AI agents can't reverse.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"payment\": \"<payment>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "set_city_ledger_dispute",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.ledger.set_city_ledger_dispute",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.ledger.set_city_ledger_dispute"
+       ]
+      },
+      "description": "Mark a company bill as disputed (or clear it). A disputed bill gets no\npayment reminders and does not count towards the overdue credit block;\nit stays on the account, in aging and on statements, flagged.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"account\": \"<account>\",\n  \"folio\": \"FOLIO-2026-00001\",\n  \"disputed\": 1\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -13761,6 +15404,43 @@
       "body": {
        "mode": "raw",
        "raw": "{\n  \"property\": \"Your Property\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "city_ledger_history",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.ledger.city_ledger_history",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.ledger.city_ledger_history"
+       ]
+      },
+      "description": "Everything that ever moved on one company's account, oldest first, with\nthe running balance: each bill (and the guest it was for), credit note,\nadjustment and payment (with the bills it cleared).",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"account\": \"<account>\"\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -14659,6 +16339,43 @@
      }
     },
     {
+     "name": "email_statements_bulk",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.statements.email_statements_bulk",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.statements.email_statements_bulk"
+       ]
+      },
+      "description": "Email several companies at once: their statement (kind=statement) or\ntheir month-end bill for `month` (kind=monthly). Each goes to the\ncompany's billing contact through the single-account functions, so the\nsame checks and Activity log apply. Accounts with no billing email are\nskipped and named; the sending runs in the background.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"accounts\": \"<accounts>\",\n  \"kind\": \"statement\",\n  \"lang\": \"en\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
      "name": "company_monthly_bill",
      "request": {
       "method": "POST",
@@ -14775,6 +16492,43 @@
      }
     },
     {
+     "name": "guests_owing",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.receivables.guests_owing",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.receivables.guests_owing"
+       ]
+      },
+      "description": "Guest bills still owed after the stay ended: departed, no-show or\ncancelled with a balance (a no-show fee, a bill left open).",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
      "name": "save_ar_account",
      "request": {
       "method": "POST",
@@ -14799,10 +16553,10 @@
         "kamra.receivables.save_ar_account"
        ]
       },
-      "description": "Open a company's AR account at a property, or edit it (`account`).\nOne open account per company per property - checkout bills into it.\nThe account number is the company's reference on statements and must\nbe unique at the property. Opening an account puts the company on\ncredit (Corporate Account.credit_allowed), since that is what it is for.",
+      "description": "Open a company's AR account at a property, or edit it (`account`).\nOne open account per company per property - checkout bills into it.\nThe account number is the company's reference on statements and must\nbe unique at the property. Opening an account puts the company on\ncredit (Corporate Account.credit_allowed), since that is what it is for.\n\nOn an edit, a field left out (None) keeps its value; an empty string\nclears it. A create retried with the same `idempotency_key` returns the\naccount it opened instead of failing.",
       "body": {
        "mode": "raw",
-       "raw": "{\n  \"property\": \"Your Property\",\n  \"company\": \"<company>\",\n  \"credit_limit\": 0,\n  \"use_default_credit_days\": 1,\n  \"credit_days\": 0,\n  \"restricted\": 0\n}",
+       "raw": "{\n  \"property\": \"Your Property\"\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -14914,6 +16668,117 @@
       "body": {
        "mode": "raw",
        "raw": "{\n  \"account\": \"<account>\",\n  \"folio\": \"FOLIO-2026-00001\",\n  \"to_account\": \"<to_account>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "write_off_ar_bill",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.receivables.write_off_ar_bill",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.receivables.write_off_ar_bill"
+       ]
+      },
+      "description": "Write off part or all of what a bill still owes on a company's account\nas bad debt, with a reason (an Adjust reason code and/or a note).\n\nAbove the property's allowance approval line (or with a supervisor\nreason code) it becomes a pending request ({\"pending\": True, ...}) that a\nmanager approves with their PIN (kamra.api.decide_allowance), unless the\ncaller is that manager. An AI agent's write-off always waits.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"account\": \"<account>\",\n  \"folio\": \"FOLIO-2026-00001\",\n  \"amount\": 1000,\n  \"reason\": \"\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "record_withholding_certificate",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.receivables.record_withholding_certificate",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.receivables.record_withholding_certificate"
+       ]
+      },
+      "description": "The payer's certificate for tax it withheld came in: keep its number\nand period. The amount stays as recorded.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"tax_withheld\": \"<tax_withheld>\",\n  \"certificate_number\": \"<certificate_number>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "withheld_tax",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.receivables.withheld_tax",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.receivables.withheld_tax"
+       ]
+      },
+      "description": "Tax companies withheld from their payments: by default the amounts\nstill waiting for a certificate, oldest first, with totals per tax.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"status\": \"Awaiting Certificate\"\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -15263,6 +17128,233 @@
    ]
   },
   {
+   "name": "ERPNext bridge (daily journal, supplier bills, HR employee link)",
+   "item": [
+    {
+     "name": "preview_daily_journal",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.erpnext_bridge.preview_daily_journal",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.erpnext_bridge.preview_daily_journal"
+       ]
+      },
+      "description": "The journal entry a closed business date would post, and the account\nmap keys it still needs. Works without ERPNext.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"business_date\": \"2026-08-01\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "post_daily_journal",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.erpnext_bridge.post_daily_journal",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.erpnext_bridge.post_daily_journal"
+       ]
+      },
+      "description": "Post a closed business date to ERPNext (night audit does it on its\nown when the setting is on). Refuses while any key is unmapped, so a\nday never posts in part.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"business_date\": \"2026-08-01\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "reverse_daily_journal",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.erpnext_bridge.reverse_daily_journal",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.erpnext_bridge.reverse_daily_journal"
+       ]
+      },
+      "description": "Cancel a business date's journal entry in ERPNext (it writes the\nreversing GL), so the date can post again after a correction.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"business_date\": \"2026-08-01\",\n  \"reason\": \"<reason>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "sync_vendor_bills",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.erpnext_bridge.sync_vendor_bills",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.erpnext_bridge.sync_vendor_bills"
+       ]
+      },
+      "description": "Post every approved supplier bill and payment not in ERPNext yet.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "staff_employees",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.erpnext_bridge.staff_employees",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.erpnext_bridge.staff_employees"
+       ]
+      },
+      "description": "Kamra staff at this property with the HR Employee each is linked to\n(Employee.user_id), and the Employees not linked to anyone yet.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "link_employee",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.erpnext_bridge.link_employee",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.erpnext_bridge.link_employee"
+       ]
+      },
+      "description": "Link a staff login to its HR Employee (or unlink with no employee).\nThe link is the Employee's own user_id, so HR and Kamra agree.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"user\": \"<user>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
    "name": "Management books (next days of cash, P&L, balance sheet)",
    "item": [
     {
@@ -15554,10 +17646,10 @@
         "kamra.night_audit.night_audit_history"
        ]
       },
-      "description": "Recent Night Audit Runs of a property, newest first, with whether\neach has a saved audit pack.",
+      "description": "Night Audit Runs of a property, newest first, with whether each has a\nsaved audit pack. from_date/to_date narrow it to business dates in that\nrange (a year of nights fits under the cap).",
       "body": {
        "mode": "raw",
-       "raw": "{\n  \"property\": \"Your Property\",\n  \"limit\": 20\n}",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"limit\": 20,\n  \"from_date\": \"2026-08-01\",\n  \"to_date\": \"2026-08-31\"\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -15715,6 +17807,43 @@
      }
     },
     {
+     "name": "no_show_preview",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.night_audit.no_show_preview",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.night_audit.no_show_preview"
+       ]
+      },
+      "description": "What marking this arrival a no-show will do, for the confirm step on\nToday, the reservation and End of Day: the fee the policy posts (pre-tax\nand with tax, the same numbers apply_no_show posts) or why there is none,\nwhat is already paid, and the credit left for the guest afterwards with\nthe property's default for it (refund or keep).",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"reservation\": \"RES-2026-00001\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
      "name": "eod_mark_no_show",
      "request": {
       "method": "POST",
@@ -15739,10 +17868,47 @@
         "kamra.night_audit.eod_mark_no_show"
        ]
       },
-      "description": "End of Day: mark an arrival that did not come a No Show now, with the\nproperty's no-show fee policy applied exactly as the audit applies it\n(fee posted on the business date, or waived for an OTA booking).",
+      "description": "Mark an arrival that did not come a No Show now - from Today, the\nreservation or End of Day - with the property's no-show fee policy\napplied exactly as the audit applies it (fee posted on the business\ndate, or waived for an OTA booking). The room is free at once: the\nchannels get a push and open desk screens refresh. `credit` is what the\nguest paid beyond the fee; settle it with settle_no_show_credit.",
       "body": {
        "mode": "raw",
        "raw": "{\n  \"reservation\": \"RES-2026-00001\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "settle_no_show_credit",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.night_audit.settle_no_show_credit",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.night_audit.settle_no_show_credit"
+       ]
+      },
+      "description": "A no-show paid more than its fee: refund the rest to the guest (the\nrefund writer, so till and ledger move) or keep it as a forfeited\ndeposit, with a reason. Same roles as a folio refund.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"reservation\": \"RES-2026-00001\",\n  \"action\": \"<action>\",\n  \"reason\": \"<reason>\"\n}",
        "options": {
         "raw": {
          "language": "json"
@@ -16046,6 +18212,63 @@
         }
        }
       }
+     }
+    }
+   ]
+  },
+  {
+   "name": "UI languages (which languages sign-in, staff and guests are offered)",
+   "item": [
+    {
+     "name": "enabled_ui_languages",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.languages.enabled_ui_languages",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.languages.enabled_ui_languages"
+       ]
+      },
+      "description": "Language codes sign-in, the staff app and guest pages may offer.\n\nEnglish is always included. With nothing saved, every shipped language\nis included."
+     }
+    },
+    {
+     "name": "set_disabled_ui_languages",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.languages.set_disabled_ui_languages",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.languages.set_disabled_ui_languages"
+       ]
+      },
+      "description": "Switch UI languages off for the whole site. Hotel Admin.\n\n`disabled` is a JSON list of language codes to hide. English is ignored.\nA shipped language left off this list stays on, including one added\nafter the list was last saved."
      }
     }
    ]
@@ -17581,6 +19804,485 @@
    ]
   },
   {
+   "name": "Service accounts (scoped keys for connected apps)",
+   "item": [
+    {
+     "name": "list_scopes",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.service_accounts.list_scopes",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.service_accounts.list_scopes"
+       ]
+      },
+      "description": ""
+     }
+    },
+    {
+     "name": "list_service_accounts",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.service_accounts.list_service_accounts",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.service_accounts.list_service_accounts"
+       ]
+      },
+      "description": ""
+     }
+    },
+    {
+     "name": "create_service_account",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.service_accounts.create_service_account",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.service_accounts.create_service_account"
+       ]
+      },
+      "description": "A new service account. The secret is shown once, here.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"account_name\": \"<account_name>\",\n  \"scopes\": \"<scopes>\",\n  \"properties\": \"<properties>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "rotate_service_account_key",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.service_accounts.rotate_service_account_key",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.service_accounts.rotate_service_account_key"
+       ]
+      },
+      "description": "A new secret; the old one stops working now. Shown once.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"account\": \"<account>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "revoke_service_account",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.service_accounts.revoke_service_account",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.service_accounts.revoke_service_account"
+       ]
+      },
+      "description": "Stop the account at once: its user is disabled and its secret\nreplaced, so the next call with the old key fails to sign in.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"account\": \"<account>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "Connected apps (connect, pair, disconnect, property profile)",
+   "item": [
+    {
+     "name": "preview",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.apps.preview",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.apps.preview"
+       ]
+      },
+      "description": "The consent step: what the app is and what it asks for.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"app_url\": \"<app_url>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "connect",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.apps.connect",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.apps.connect"
+       ]
+      },
+      "description": "Approve an app: a service account with exactly these scopes and\nproperties, a registry entry, its redirect address, and a one-time\npairing code (shown once).",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"app_url\": \"<app_url>\",\n  \"scopes\": \"<scopes>\",\n  \"properties\": \"<properties>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "new_pairing_code",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.apps.new_pairing_code",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.apps.new_pairing_code"
+       ]
+      },
+      "description": "A fresh code for an app that has not paired yet; the old one stops.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"app_id\": \"<app_id>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "disconnect",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.apps.disconnect",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.apps.disconnect"
+       ]
+      },
+      "description": "Off at once: the service account is revoked, the redirect address and\nthe staff tokens issued through it go, and the tile disappears.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"app_id\": \"<app_id>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "list_apps",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.apps.list_apps",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.apps.list_apps"
+       ]
+      },
+      "description": ""
+     }
+    },
+    {
+     "name": "set_trust",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.apps.set_trust",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.apps.set_trust"
+       ]
+      },
+      "description": "IT: allow unsigned (self-hosted) apps, and/or replace the list of\ntrusted publisher keys (base64 Ed25519 public keys)."
+     }
+    },
+    {
+     "name": "pair",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.apps.pair",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.apps.pair"
+       ]
+      },
+      "description": "The one unauthenticated endpoint: the app trades its one-time code for\nits key and secret. Every attempt that gets past the rate limit is in the\nAgent Action Log. A refused attempt gets HTTP 403 and\n{\"error\": \"invalid_code\"}.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"code\": \"<code>\",\n  \"app_id\": \"<app_id>\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    },
+    {
+     "name": "my_apps",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.apps.my_apps",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.apps.my_apps"
+       ]
+      },
+      "description": "Paired apps in the switcher for the signed-in person: admins see every\none, staff the ones whose manifest names one of their roles. Apps whose\nmanifest sets \"switcher\": false are left out."
+     }
+    },
+    {
+     "name": "property_profile",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "token {{api_key}}:{{api_secret}}"
+       }
+      ],
+      "url": {
+       "raw": "{{base_url}}/api/method/kamra.apps.property_profile",
+       "host": [
+        "{{base_url}}"
+       ],
+       "path": [
+        "api",
+        "method",
+        "kamra.apps.property_profile"
+       ]
+      },
+      "description": "Read-only branding and locale for one property: name, logo, address,\ntax ID, currency, language, time zone, check-in and check-out times.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"property\": \"Your Property\"\n}",
+       "options": {
+        "raw": {
+         "language": "json"
+        }
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
    "name": "Public (no auth - booking page, check-in)",
    "item": [
     {
@@ -17940,10 +20642,10 @@
         "kamra.public_api.book"
        ]
       },
-      "description": "Create a Website booking. Guest identity is the phone number; staff\nverify at check-in. The advance owed is computed from the property's\ncurrent payment policy and snapshotted onto the booking.\n\nInstant mode (default): Confirmed when nothing is due now, else\nPending Payment with a hold window. Request to Book: Requested (no\ninventory) until the host approves. A party above what the room sleeps,\nwithin the extra guests it allows, is also Requested: the host confirms\nthe sleeping arrangement and agrees the price for them.",
+      "description": "Create a Website booking. `source_tag` is the src / utm_source tag of\nthe booking link the guest came in on, kept on the reservation when the\nproperty has booking links on (#560). An existing guest profile is reused when\nboth the phone and the full name match; staff verify at check-in.\nThe advance owed is computed from the property's\ncurrent payment policy and snapshotted onto the booking.\n\nInstant mode (default): Confirmed when nothing is due now, else\nPending Payment with a hold window. Request to Book: Requested (no\ninventory) until the host approves. A party above what the room sleeps,\nwithin the extra guests it allows, is also Requested: the host confirms\nthe sleeping arrangement and agrees the price for them.",
       "body": {
        "mode": "raw",
-       "raw": "{\n  \"property\": \"Your Property\",\n  \"room_type\": \"Your Property-DLX\",\n  \"check_in_date\": \"2026-08-01\",\n  \"check_out_date\": \"2026-08-03\",\n  \"guest_name\": \"A. Guest\",\n  \"phone\": \"+91 90000 00000\",\n  \"email\": \"guest@example.com\",\n  \"adults\": 2,\n  \"children\": 0,\n  \"meal_plan\": \"\",\n  \"special_requests\": \"\",\n  \"voucher_code\": \"\",\n  \"idempotency_key\": \"\",\n  \"pets\": 0,\n  \"marketing_consent\": 0\n}",
+       "raw": "{\n  \"property\": \"Your Property\",\n  \"room_type\": \"Your Property-DLX\",\n  \"check_in_date\": \"2026-08-01\",\n  \"check_out_date\": \"2026-08-03\",\n  \"guest_name\": \"A. Guest\",\n  \"phone\": \"+91 90000 00000\",\n  \"email\": \"guest@example.com\",\n  \"adults\": 2,\n  \"children\": 0,\n  \"meal_plan\": \"\",\n  \"special_requests\": \"\",\n  \"voucher_code\": \"\",\n  \"idempotency_key\": \"\",\n  \"pets\": 0,\n  \"marketing_consent\": 0,\n  \"source_tag\": \"\"\n}",
        "options": {
         "raw": {
          "language": "json"

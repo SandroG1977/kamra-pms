@@ -1,4 +1,8 @@
+<<<<<<<< HEAD:kamra/public/frontend/assets/party-popper-DlPNheUR.js
 import{b as p}from"./index-1umbYUla.js";/**
+========
+import{o as p}from"./index-DUcwpva4.js";/**
+>>>>>>>> v2.8.1:kamra/public/frontend/assets/party-popper-CY35gO5Z.js
  * @license lucide-react v0.525.0 - ISC
  *
  * This source code is licensed under the ISC license.

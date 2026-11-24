@@ -7,6 +7,8 @@
 // session; guests and the dev server (ignore_csrf) don't need it.
 import { htmlToText } from "./utils"
 import { t as translate } from "./i18n"
+import type { NightPrice } from "./nightPrices"
+import * as offline from "./offline"
 
 function csrfToken(): string | undefined {
   const t = (window as unknown as { csrf_token?: string }).csrf_token
@@ -91,7 +93,9 @@ async function doFetch(path: string, init?: RequestInit, retried = false): Promi
     // excluded so it doesn't trigger a session re-check.
     if (
       (res.status === 401 || res.status === 403) &&
-      !path.includes("/api/method/login")
+      !path.includes("/api/method/login") &&
+      !path.includes("user.reset_password") &&
+      !path.includes("user.update_password")
     ) {
       window.dispatchEvent(new Event("kamra:auth-error"))
     }
@@ -157,6 +161,36 @@ export async function login(usr: string, pwd: string) {
 
 export async function logout() {
   await doFetch("/api/method/logout", { method: "POST" })
+  const store = offlineStore()
+  if (store) offline.clearAll(store)
+  announceSessionChange()
+}
+
+/** Ask Frappe to email a reset link. Same reply whether the account exists. */
+export async function requestPasswordReset(user: string) {
+  await doFetch("/api/method/frappe.core.doctype.user.user.reset_password", {
+    method: "POST",
+    body: JSON.stringify({ user }),
+  })
+}
+
+/** Set a new password from a reset email key, or change it while signed in
+ *  (pass the current password). Frappe signs the user in on success. */
+export async function updatePassword(opts: {
+  new_password: string
+  key?: string
+  old_password?: string
+  logout_all_sessions?: boolean
+}) {
+  await doFetch("/api/method/frappe.core.doctype.user.user.update_password", {
+    method: "POST",
+    body: JSON.stringify({
+      new_password: opts.new_password,
+      key: opts.key || undefined,
+      old_password: opts.old_password || undefined,
+      logout_all_sessions: opts.logout_all_sessions ? 1 : 0,
+    }),
+  })
   announceSessionChange()
 }
 
@@ -239,15 +273,69 @@ export function newIdempotencyKey(): string {
     : `k-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+/** Frappe's own (readable) cookie names the signed-in user: the offline
+ *  copies are kept per user, so a shared desk PC never mixes them. */
+function cookieUser(): string {
+  const m = document.cookie.match(/(?:^|;\s*)user_id=([^;]*)/)
+  return m ? decodeURIComponent(m[1]) : "Guest"
+}
+
+function offlineStore(): offline.Store | null {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
 export async function call<T = unknown>(
   method: string,
   params: Record<string, unknown> = {},
 ): Promise<T> {
-  const data = await frappeFetch<{ message: T }>(`/api/method/${method}`, {
-    method: "POST",
-    body: JSON.stringify(params),
+  try {
+    const data = await frappeFetch<{ message: T }>(`/api/method/${method}`, {
+      method: "POST",
+      body: JSON.stringify(params),
+    })
+    const store = offlineStore()
+    if (store) offline.saveRead(store, cookieUser(), method, params, data.message, Date.now())
+    return data.message
+  } catch (e) {
+    // an outage (#228): the last copy of a read-only screen, or a safe
+    // write kept to send when the server is back. Everything else fails.
+    const store = offlineStore()
+    if (!store || !isNetworkError(e)) throw e
+    const kept = offline.loadRead<T>(store, cookieUser(), method, params)
+    if (kept) {
+      window.dispatchEvent(new CustomEvent("kamra:stale", { detail: kept.at }))
+      return kept.data
+    }
+    if (offline.enqueue(store, cookieUser(), method, params, Date.now())) {
+      window.dispatchEvent(new Event("kamra:queue"))
+      return { ok: true, queued: true, ...params } as T
+    }
+    throw e
+  }
+}
+
+// every successful call says "online", so replays would overlap: one at a
+// time, or a queued change could be sent twice
+let replaying: Promise<unknown> | null = null
+
+/** Send the writes kept during an outage, one replay at a time. */
+export function replayOffline() {
+  const store = offlineStore()
+  if (replaying || !store || !offline.queued(store).length) return replaying
+  replaying = offline.replay(
+    store,
+    (method, params) => frappeFetch(`/api/method/${method}`, { method: "POST", body: JSON.stringify(params) }),
+    isNetworkError,
+    serverError,
+  ).finally(() => {
+    replaying = null
+    window.dispatchEvent(new Event("kamra:queue"))
   })
-  return data.message
+  return replaying
 }
 
 /** Call an allow_guest endpoint as a guest, whoever is logged in.
@@ -330,10 +418,13 @@ export interface RoomRow {
   floor: string | null
   housekeeping_status: "Clean" | "Dirty" | "Inspected" | "Out of Order"
   occupancy_status: "Vacant" | "Occupied"
+  // held out of service today (Room Blocks); null when sellable
+  block?: { reason: string | null; to_date: string } | null
 }
 
 export interface Snapshot {
   date: string
+  business_date?: string | null
   arrivals: ReservationRow[]
   departures: ReservationRow[]
   in_house: ReservationRow[]
@@ -392,6 +483,8 @@ export interface BookingOptions {
   ota_channels?: string[]
   /** each OTA's default commission % (its Travel Agent record of type OTA) */
   ota_commission?: Record<string, number>
+  /** may type a night's price (Revenue Manager / Hotel Admin) */
+  can_set_rate?: boolean
   experiences: {
     name: string
     experience_name: string
@@ -409,6 +502,9 @@ export interface BookingOptions {
     pets_allowed: 0 | 1
     pet_charge: number
     pet_charge_basis: "Per stay" | "Per night"
+    /** the property's standard times, HH:MM */
+    checkin_time: string
+    checkout_time: string
   }
 }
 
@@ -416,7 +512,7 @@ export interface Quote {
   nights: number
   /** same-day stay: nights is 0 and one date is billed */
   day_use?: boolean
-  nightly: { date: string; rate: number }[]
+  nightly: { date: string; rate: number; hand_set?: boolean }[]
   room_total: number
   meal_total: number
   /** the rate plan the price is on - picked, or the company's negotiated one */
@@ -510,6 +606,8 @@ export interface QuoteParams {
   voucher_code?: string
   over_capacity_charge?: number
   pets?: number
+  /** nights the desk priced by hand; the rest are priced by Kamra */
+  night_prices?: NightPrice[]
 }
 
 export const getQuote = (params: QuoteParams) =>
@@ -656,6 +754,8 @@ export interface BanquetService {
   is_alcohol: 0 | 1
   on_pack_list: 0 | 1
   description: string | null
+  /** units owned; 0 = not tracked on the equipment calendar */
+  stock_qty?: number
 }
 export interface BanquetVenue {
   name: string
@@ -671,6 +771,23 @@ export interface BanquetVenue {
   gst_rate: number
   setup_styles: string | null
   amenities: string | null
+}
+export interface EquipmentCalendar {
+  start: string
+  end: string
+  items: {
+    item: string
+    item_name: string
+    category: string
+    stock_qty: number
+    days: {
+      date: string
+      confirmed: number
+      tentative: number
+      over: boolean
+      functions: { function: string; customer_name: string; status: string; qty: number }[]
+    }[]
+  }[]
 }
 export interface BanquetCatalogue {
   menus: BanquetMenu[]
@@ -709,6 +826,8 @@ export interface PaymentTerm {
   status: "Pending" | "Overdue" | "Received" | "Waived"
   received_on: string | null
   reference: string | null
+  payment_link_url?: string | null
+  guest_reminded_on?: string | null
 }
 export interface OpenItem {
   name: string
@@ -822,6 +941,19 @@ export interface FunctionSheet {
   beo_number: string | null
   beo_generated_on: string | null
   contract_signed_on: string | null
+  tasting_status?: "" | "Requested" | "Scheduled" | "Done" | "Waived" | null
+  tasting_on?: string | null
+  tasting_pax?: number | null
+  tasting_chef?: string | null
+  tasting_notes?: string | null
+  tasting_invited_on?: string | null
+  wifi_ssid?: string | null
+  wifi_password?: string | null
+  speed_test_mbps?: number | null
+  av_notes?: string | null
+  staff_male?: number | null
+  staff_female?: number | null
+  bar_setup?: "" | "No" | "Yes" | null
   payment_terms_note: string | null
   requirements: string | null
   beo_notes: string | null
@@ -936,6 +1068,8 @@ export interface BanquetPipeline {
     pipeline_value: number
     outstanding: number
     conversion_rate: number | null
+    /** each stage at its odds: Enquiry 20%, Tentative 50%, Confirmed 100% */
+    weighted_value?: number
   }
   lost_reasons: { reason: string; count: number }[]
 }
@@ -1626,6 +1760,23 @@ export const banquet = {
         }[]
       }[]
     }>("kamra.banquet_ops.function_tasks", { function: fn }),
+  scheduleTasting: (fn: string, tastingOn: string, opts?: { pax?: number; chef?: string; notes?: string }) =>
+    call<{ ok: boolean; tasting_status: string; tasting_on: string; emailed: boolean }>(
+      "kamra.banquet_ops.schedule_tasting",
+      { function: fn, tasting_on: tastingOn, pax: opts?.pax ?? null, chef: opts?.chef ?? null, notes: opts?.notes ?? null },
+    ),
+  recordTasting: (fn: string, outcome: "Done" | "Waived", notes?: string) =>
+    call<{ ok: boolean; tasting_status: string }>("kamra.banquet_ops.record_tasting", {
+      function: fn, outcome, notes: notes ?? null,
+    }),
+  sendPaymentLink: (fn: string, term: string, channels: string[] = ["email"]) =>
+    call<{ url: string; amount: number; currency: string; sent: string[]; test_mode: boolean }>(
+      "kamra.banquet_ops.send_payment_link", { function: fn, term, channels },
+    ),
+  equipmentCalendar: (startDate?: string, days = 30) =>
+    call<EquipmentCalendar>("kamra.banquet_ops.equipment_calendar", {
+      property: getCurrentProperty(), start_date: startDate ?? null, days,
+    }),
   completeFunctionTask: (task: string, done = true) =>
     call<{ ok: boolean; name: string; status: string }>(
       "kamra.banquet_ops.complete_function_task",
@@ -1784,8 +1935,11 @@ export interface ReservationDetail {
     can_check_in: boolean
     can_check_out: boolean
     can_cancel: boolean
+    can_no_show?: boolean
     can_amend: boolean
     can_reinstate: boolean
+    /** same-day check-in with nothing on the bill (api.reverse_check_in) */
+    can_reverse_check_in?: boolean
   }
   /** Things the desk should see but which must never gate an arrival. Kept
    *  apart from `actions` on purpose: a missing ID is a warning, not a
@@ -1851,11 +2005,13 @@ export const amendStayPreview = (
   reservation: string,
   check_in_date: string,
   check_out_date: string,
+  early_arrival = 0,
 ) =>
   call<RepricePreview>("kamra.api.amend_stay_preview", {
     reservation,
     check_in_date,
     check_out_date,
+    early_arrival,
   })
 
 export const amendStay = (

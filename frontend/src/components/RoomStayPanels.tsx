@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { call } from "../lib/api"
+import { call, newIdempotencyKey } from "../lib/api"
 import { serverError } from "../lib/resource"
 import { fmtMoney, loadLocale, locale, sellsAlcohol, useLocale } from "../lib/money"
 import { useCashierAuth } from "../lib/cashierAuth"
@@ -254,6 +254,8 @@ export function StayBilling({ d, onChanged }: { d: RoomDetail; onChanged: () => 
     is_alcohol: false,
   })
   const [pay, setPay] = useState({ folio: "", mode: locale().payment_modes[0] ?? "Cash", amount: "", reference: "" })
+  // one key per Collect press: a retry after a lost response replays (#550)
+  const [payKey, setPayKey] = useState(newIdempotencyKey)
 
   useEffect(() => {
     loadLocale().then((l) => setRates(l.tax_rates))
@@ -429,6 +431,8 @@ export function StayBilling({ d, onChanged }: { d: RoomDetail; onChanged: () => 
               className={cn(inputCls, "mt-1")}
             />
           </label>
+          {/* no picker where the hotel charges no tax (its only rate is 0%) */}
+          {!(rates.length === 1 && Number(rates[0]) === 0) && (
           <label className="block text-sm text-zinc-600">
             {t("{tax} rate", { tax: loc.tax_label || t("Tax") })}
             <select
@@ -443,6 +447,7 @@ export function StayBilling({ d, onChanged }: { d: RoomDetail; onChanged: () => 
               ))}
             </select>
           </label>
+          )}
         </div>
         {sellsAlcohol() && (
         <label className="flex min-h-11 items-center gap-2 text-sm text-zinc-600">
@@ -540,7 +545,9 @@ export function StayBilling({ d, onChanged }: { d: RoomDetail; onChanged: () => 
                 kind: "Payment",
                 amount: Number(pay.amount),
                 reference: pay.reference || undefined,
+                idempotency_key: payKey,
               })
+              setPayKey(newIdempotencyKey())
               setPay({ ...pay, amount: "", reference: "" })
             }, t("Payment recorded."))
           }

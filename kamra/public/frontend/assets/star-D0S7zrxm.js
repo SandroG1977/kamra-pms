@@ -1,4 +1,8 @@
+<<<<<<<< HEAD:kamra/public/frontend/assets/star-D0S7zrxm.js
 import{b as a}from"./index-1umbYUla.js";/**
+========
+import{o as a}from"./index-DUcwpva4.js";/**
+>>>>>>>> v2.8.1:kamra/public/frontend/assets/star-BDXJ-QGD.js
  * @license lucide-react v0.525.0 - ISC
  *
  * This source code is licensed under the ISC license.

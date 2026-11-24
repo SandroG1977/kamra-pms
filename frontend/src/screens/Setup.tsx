@@ -11,6 +11,7 @@ import { cn } from "../lib/utils"
 import { cur, loadLocale } from "../lib/money"
 import { useT, t as translate } from "../lib/i18n"
 import GoLiveImport from "./GoLiveImport"
+import { UsageSetupCard } from "./settings/UsageReportingPage"
 
 
 const inputCls =
@@ -985,7 +986,7 @@ export default function Setup() {
                       onChange={(e) => setOutlets((r) => r.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
                     <select className={cn(inputCls, "w-40 bg-white")} value={o.type}
                       onChange={(e) => setOutlets((r) => r.map((x, j) => (j === i ? { ...x, type: e.target.value } : x)))}>
-                      {["Restaurant", "Room Service", "Bar", "Spa", "Other"].map((x) => <option key={x} value={x}>{translate(x)}</option>)}
+                      {["Restaurant", "Room Service", "Bar", "Spa", "Shop", "Other"].map((x) => <option key={x} value={x}>{translate(x)}</option>)}
                     </select>
                     {outlets.length > 1 && (
                       <Button variant="ghost" aria-label={t("Remove")} onClick={() => setOutlets((r) => r.filter((_, j) => j !== i))}>
@@ -1114,7 +1115,7 @@ export default function Setup() {
               </div>
               <div className="rounded-lg border border-brand-200 bg-brand-50/60 px-4 py-3 text-sm text-zinc-800">
                 <p className="font-semibold text-brand-800">
-                  {t("Optional: connect HeyKoala WhatsApp")}
+                  {t("Optional: guest concierge on WhatsApp")}
                 </p>
                 <p className="mt-1 text-zinc-600">
                   {t(
@@ -1128,6 +1129,14 @@ export default function Setup() {
                   {t("Open Marketplace → HeyKoala WhatsApp")}
                 </a>
               </div>
+              <UsageSetupCard
+                prefill={{
+                  property_name: prop.property_name,
+                  city: prop.city,
+                  country: prop.country,
+                  room_count: roomTypes.reduce((n, r) => n + r.numbers.split(",").filter((x) => x.trim()).length, 0),
+                }}
+              />
               <GoLiveImport property={createdProperty} embedded />
             </div>
           )}

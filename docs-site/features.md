@@ -45,12 +45,13 @@ allowances always need a reason.
 
 ## Night audit
 
-The **End of Day** wizard checks arrivals, departures, open restaurant
-bills and tills, lets you acknowledge or fix each one, then posts the
-nights, applies the no-show policy and saves an audit pack of the day's
-reports. It also runs by itself at 03:00.
+**Night Audit** is one page: it shows only what needs you (departures still
+in house, open restaurant bills, open tills and the rest), lets you fix or
+override each one, then posts the nights, applies the no-show policy and
+saves an audit pack of the day's reports, every table exportable to CSV.
+It also runs by itself at 03:00.
 
-![The End of Day wizard](/img/night-audit/wizard.png)
+![Closing the day: the date and the Close button at the top, how many checks are clear, and what needs you](/img/night-audit/close-day.png)
 
 [Night audit guide →](/night-audit)
 
@@ -137,9 +138,10 @@ the hotel, an advance, a registration fee or the full amount online.
 The property's country picks a **localisation pack**: tax rules and
 labels, invoice wording, currency and number format, the ID documents the
 desk accepts and the ways to pay. Packs exist for India (GST), Indonesia,
-Thailand, Malaysia, the UAE and Saudi Arabia (with ZATCA e-invoicing),
-plus a flat-tax pack for everywhere else. Adding a country is one Python
-file. See [Country setup](/country-setup).
+Thailand, Malaysia, the Philippines, the UAE and Saudi Arabia (with ZATCA
+e-invoicing), Brazil, Germany (7% MwSt on lodging, 19% on food and
+services) and Nicaragua, plus a flat-tax pack for everywhere else. Adding
+a country is one Python file. See [Country setup](/country-setup).
 
 ## Short-term rentals
 

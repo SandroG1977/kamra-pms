@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { cn } from "../lib/utils"
 import { sortFloors, type FloorOrder } from "../lib/floors"
 import { useT, t as translate } from "../lib/i18n"
+import { InspectionQuality, RoomStatusCases } from "../components/HkQuality"
 
 
 // Ready: passed its inspection when the turnover profile requires one
@@ -96,7 +97,11 @@ export default function HousekeepingBoard() {
 
   useEffect(() => {
     load()
-    const id = setInterval(load, 30_000)
+    // Match Rooms/Today: 60s poll, skip while the tab is hidden.
+    const id = setInterval(() => {
+      if (document.visibilityState === "hidden") return
+      load()
+    }, 60_000)
     return () => clearInterval(id)
   }, [load])
 
@@ -215,6 +220,9 @@ export default function HousekeepingBoard() {
           </button>
         ))}
       </div>
+
+      <RoomStatusCases staff={staff} />
+      {canSupervise && <InspectionQuality />}
 
       <Card>
         <CardHeader>

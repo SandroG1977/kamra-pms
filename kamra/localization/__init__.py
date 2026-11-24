@@ -24,6 +24,14 @@ and the accessors refuse rather than fall back to another country's:
   tax_return_rows(property, from_date, to_date) -> list[dict]
   verify_tax_id(property, tax_id, business_name) -> dict
   verify_guest_id(property, guest, id_type, consent) -> dict
+
+Optional withholding taxes a company payer deducts from a bill (#521):
+  WITHHOLDING_TAXES = [{"code", "label", "rates": [...]}]
+
+Optional official FX source. Absent means the open market feed
+(kamra.ledger.market_rates):
+  market_rates(home) -> (rates, as_of)
+  rates: {ISO code: home-currency units per 1 foreign unit}
 """
 
 import importlib
@@ -104,21 +112,31 @@ def default_nationality(pack) -> str:
 def money_text(property: str | None, amount) -> str:
 	"""An amount in the property's currency for server-written text (the
 	activity log, alerts) - never a hardcoded rupee sign."""
-	symbol = ""
+	symbol, currency = "", ""
 	try:
 		if property:
 			prop = frappe.get_cached_doc("Property", property)
-			symbol = pack_for(property).locale(prop).get("currency_symbol") or ""
+			loc = pack_for(property).locale(prop)
+			symbol, currency = loc.get("currency_symbol") or "", loc.get("currency") or ""
 	except Exception:
 		symbol = ""
 	try:
 		value = float(amount or 0)
 	except (TypeError, ValueError):
 		return f"{symbol}{amount}"
-	text = f"{value:,.2f}"
-	if text.endswith(".00"):
-		text = text[:-3]
-	return f"{symbol}{text}"
+	return f"{'-' if value < 0 else ''}{symbol}{group_digits(abs(value), currency == 'INR')}"
+
+
+def group_digits(value: float, lakh: bool = False) -> str:
+	"""11025 -> 11,025 and 28360.4 -> 28,360.40; with lakh, 120000 -> 1,20,000
+	as the desk shows rupees."""
+	text = f"{value:,.2f}".removesuffix(".00")
+	if not lakh:
+		return text
+	whole, _, frac = text.replace(",", "").partition(".")
+	head, tail = whole[:-3], whole[-3:]
+	groups = [head[max(i - 2, 0):i] for i in range(len(head), 0, -2)][::-1]
+	return ",".join([*groups, tail]) + (f".{frac}" if frac else "")
 
 
 def service_code_for(pack, prop_doc, charge_type: str | None = None):
@@ -160,15 +178,27 @@ def amount_in_words(pack, prop_doc, amount) -> str:
 # ── front-desk vocabulary: IDs and ways to pay ───────────────────────────
 # A pack declares ID_TYPES / PAYMENT_MODES / DEFAULT_* as module constants.
 # The desk offers Cash, Card and Bank Transfer everywhere. A pack may add
-# its own instant / wallet modes (INSTANT_PAYMENT_MODES, e.g. India's UPI):
-# each must also be a Folio Payment / Cashier Transaction option, and the
-# till keeps them in their own bucket (Cashier Session.system_upi).
+# its own instant / wallet modes (INSTANT_PAYMENT_MODES, e.g. India's UPI,
+# Indonesia's QRIS): each must also be an option on Folio Payment, Cashier
+# Transaction, Banquet Receipt and POS Order, and the till keeps them in
+# their own bucket (Cashier Session.system_upi).
 
 GENERIC_ID_TYPES = ["Passport", "National ID", "Driving License", "Other"]
 GENERIC_PAYMENT_MODES = ["Cash", "Card", "Bank Transfer"]
 # modes that are not a country's: any property may record them
 CORE_PAYMENT_MODES = ("Cash", "Foreign Cash", "Card", "Bank Transfer", "OTA Prepaid",
                       "Company Credit", "Payment Link", "Cheque", "Other")
+
+
+# Tax a company payer withholds from a bill and certifies later (#521):
+# WITHHOLDING_TAXES = [{"code", "label", "rates": [percent, ...]}]. A pack
+# without one still lets Finance record a plain withholding.
+GENERIC_WITHHOLDING_TAXES = [{"code": "WHT", "label": "Tax withheld", "rates": []}]
+
+
+def withholding_taxes(pack) -> list[dict]:
+	return [dict(t) for t in getattr(pack, "WITHHOLDING_TAXES", None)
+	        or GENERIC_WITHHOLDING_TAXES]
 
 
 def id_types(pack) -> list[str]:
@@ -185,11 +215,20 @@ def payment_modes(pack) -> list[str]:
 	return [m for m in modes if m in allowed]
 
 
+def cash_denominations(pack) -> list[float]:
+	"""The notes and coins a till counts at close (CASH_DENOMINATIONS),
+	largest first. Empty where the pack names none: any value is counted."""
+	return [float(v) for v in getattr(pack, "CASH_DENOMINATIONS", None) or ()]
+
+
 def outlet_payment_modes(pack) -> list[str]:
-	"""What a bill is settled with at an outlet (POS): cash, card and the
-	pack's instant modes."""
+	"""What a bill is settled with at an outlet (POS): cash, card, bank
+	transfer and the pack's instant modes. A restaurant takes a transfer as
+	the front desk does. Whatever a pack adds here must also be an option on
+	POS Order's Payment Mode."""
 	instant = instant_payment_modes(pack)
-	return [m for m in payment_modes(pack) if m in ("Cash", "Card") or m in instant]
+	return [m for m in payment_modes(pack)
+	        if m in ("Cash", "Card", "Bank Transfer") or m in instant]
 
 
 def assert_payment_mode(property: str, mode: str | None) -> None:
@@ -365,9 +404,17 @@ def parse_payment_webhook(gateway: str, payload: bytes, headers: dict,
 	if not provider:
 		return None
 	folio = provider.webhook_folio(payload)
-	if not folio or not frappe.db.exists("Folio", folio):
+	# a banquet milestone link carries "VB:<function>:<term>" (kamra.banquet_ops)
+	banquet = (folio or "").startswith("VB:")
+	if banquet:
+		function = folio[3:].partition(":")[0]
+		property = frappe.db.get_value("Venue Booking", function, "property")
+		if not property:
+			return None
+	elif not folio or not frappe.db.exists("Folio", folio):
 		return None
-	property = frappe.db.get_value("Folio", folio, "property")
+	else:
+		property = frappe.db.get_value("Folio", folio, "property")
 	if gateway not in payment_gateways(pack_for(property)):
 		return None
 	settings = settings_for(property)

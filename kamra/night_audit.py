@@ -61,7 +61,7 @@ BLOCKABLE = {
 ORDER = ("open_tills", "open_pos_bills", "departures_due", "arrivals_pending",
          "rate_variance", "zero_rate", "pos_room_postings", "high_balance",
          "departed_balances", "credit_limit", "overdue_ar", "room_status",
-         "vacant_rooms")
+         "vacant_rooms", "anomalies")
 
 # The End of Day wizard, in Opera's order: (key, title, the checks it shows)
 STEPS = (
@@ -74,7 +74,7 @@ STEPS = (
 	("rates", "Rate check", ("rate_variance", "zero_rate")),
 	("rooms", "Room status", ("room_status", "vacant_rooms")),
 	("cashiers", "Cashier closure", ("open_tills",)),
-	("notes", "Notes", ()),
+	("notes", "Notes", ("anomalies",)),
 	("run", "Post room and tax and roll the business date", ()),
 	("reports", "Print final reports", ()),
 	("finalize", "Finalize", ()),
@@ -356,6 +356,7 @@ def _expected_night(res, bd: str) -> tuple[float | None, str]:
 
 
 def check_rate_variance(property: str, bd: str) -> dict:
+	from kamra.folio import STANDS_ON_ITS_DATE
 	tol = flt(_setting(property, "na_rate_variance_tolerance"))
 	rows = frappe.db.sql(
 		"""
@@ -366,6 +367,7 @@ def check_rate_variance(property: str, bd: str) -> dict:
 		JOIN `tabFolio` f ON fc.parent = f.name
 		WHERE f.property = %(p)s AND fc.posting_date = %(d)s
 		  AND fc.charge_type = 'Room'
+		  AND """ + STANDS_ON_ITS_DATE + """
 		GROUP BY COALESCE(NULLIF(fc.reservation, ''), f.reservation)
 		""", {"p": property, "d": bd}, as_dict=True)
 	items = []
@@ -395,6 +397,7 @@ def check_rate_variance(property: str, bd: str) -> dict:
 
 
 def check_pos_room_postings(property: str, bd: str) -> dict:
+	from kamra.folio import STANDS_ON_ITS_DATE
 	rows = frappe.db.sql(
 		"""
 		SELECT fc.name AS row_name, fc.parent AS folio, fc.description,
@@ -405,6 +408,7 @@ def check_pos_room_postings(property: str, bd: str) -> dict:
 		JOIN `tabFolio` f ON fc.parent = f.name
 		WHERE f.property = %(p)s AND fc.posting_date = %(d)s
 		  AND fc.charge_type = 'Food & Beverage' AND fc.description LIKE '%%(%%)'
+		  AND """ + STANDS_ON_ITS_DATE + """
 		ORDER BY fc.creation
 		""", {"p": property, "d": bd}, as_dict=True)
 	refs = {}
@@ -658,6 +662,232 @@ def check_vacant_rooms(property: str) -> dict:
 		"/housekeeping-board")
 
 
+# --- statistical anomalies (#558) ---------------------------------------------
+# Patterns that are only unusual against the property's own history. Plain
+# mean / standard deviation from the stdlib: a flag is a value more than
+# ANOMALY_Z deviations above the usual, and always says what the usual is and
+# which rows it is about. Off until the property has MIN_HISTORY_DAYS of
+# posted room nights, so a new property is not flooded with false alarms.
+
+MIN_HISTORY_DAYS = 30
+HISTORY_DAYS = 90      # how far back "usual" looks
+ANOMALY_Z = 3.0
+MIN_SAMPLES = 10       # history points needed before anything is compared
+MIN_COUNT = 3          # fewer voids/allowances in a day is never a spike
+NO_SHOW_WINDOW = 30    # days of no-shows looked at per source
+NO_SHOW_RATIO = 3.0    # a source's no-show rate vs the property's
+
+
+def _spike(value: float, history: list[float], floor: float):
+	"""(mean, sd) when value is an upper outlier of history, else None.
+	floor keeps a flat history (sd 0) from flagging a tiny change."""
+	from statistics import fmean, pstdev
+	if len(history) < MIN_SAMPLES:
+		return None
+	mean = fmean(history)
+	sd = max(pstdev(history), floor)
+	return (mean, sd) if value > mean + ANOMALY_Z * sd else None
+
+
+def _history_days(property: str, bd: str) -> int:
+	first = frappe.db.sql(
+		"""SELECT MIN(fc.posting_date) FROM `tabFolio Charge` fc
+		   JOIN `tabFolio` f ON fc.parent = f.name
+		   WHERE f.property = %s AND fc.charge_type = 'Room'""", property)[0][0]
+	return (getdate(bd) - getdate(first)).days if first else 0
+
+
+def _daily_counts(rows: list, bd: str) -> dict[str, tuple[list, list]]:
+	"""{user: (today's source rows, [count per day over the history])}.
+	rows: (user, day, doctype, name). Days the user did none count as 0,
+	from their first one in the window."""
+	from frappe.utils import add_days
+	start = str(add_days(bd, -HISTORY_DAYS))
+	by_user: dict[str, dict] = {}
+	for user, day, doctype, name in rows:
+		by_user.setdefault(user, {}).setdefault(str(day), []).append(
+			{"doctype": doctype, "name": name})
+	out = {}
+	for user, days in by_user.items():
+		today = days.get(bd, [])
+		if not today:
+			continue
+		first = min(d for d in days if d < bd) if any(d < bd for d in days) else bd
+		hist, day = [], max(first, start)
+		while day < bd:
+			hist.append(len(days.get(day, [])))
+			day = str(add_days(day, 1))
+		out[user] = (today, hist)
+	return out
+
+
+def _count_spikes(kind: str, label: str, rows: list, bd: str) -> list[dict]:
+	"""Users who did far more of `kind` today than they usually do; a user
+	with too little history of their own is compared with everyone's days."""
+	per_user = _daily_counts(rows, bd)
+	everyone = [n for _today, hist in per_user.values() for n in hist]
+	items = []
+	for user, (today, hist) in per_user.items():
+		n = len(today)
+		if n < MIN_COUNT:
+			continue
+		base, whose = (hist, "their") if len(hist) >= MIN_SAMPLES else (everyone, "the property's")
+		hit = _spike(n, base, floor=1.0)
+		if hit:
+			items.append({
+				"kind": kind, "who": user, "value": n,
+				"reason": f"{n} {label} today; {whose} usual is "
+				          f"{hit[0]:.1f} a day (sd {hit[1]:.1f}).",
+				"sources": today})
+	return items
+
+
+def _void_and_allowance_spikes(property: str, bd: str) -> list[dict]:
+	from frappe.utils import add_days
+	since = str(add_days(bd, -HISTORY_DAYS))
+	voids = frappe.db.sql(
+		"""SELECT actor, DATE(creation), reference_doctype, reference_name
+		   FROM `tabAgent Action Log`
+		   WHERE property = %s AND action_type IN ('void_charge', 'pos_void_item')
+		     AND DATE(creation) BETWEEN %s AND %s""", (property, since, bd))
+	allowances = frappe.db.sql(
+		"""SELECT requested_by, DATE(requested_on), 'Allowance Request', name
+		   FROM `tabAllowance Request`
+		   WHERE property = %s AND status = 'Approved'
+		     AND DATE(requested_on) BETWEEN %s AND %s""", (property, since, bd))
+	return (_count_spikes("voids", "voids", voids, bd)
+	        + _count_spikes("allowances", "allowances and discounts", allowances, bd))
+
+
+def _cash_variance_outliers(property: str, bd: str) -> list[dict]:
+	from frappe.utils import add_days
+	rows = frappe.get_all(
+		"Cashier Session",
+		filters={"property": property, "status": "Closed",
+		         "business_date": ("between", [str(add_days(bd, -HISTORY_DAYS)), bd])},
+		fields=["name", "user", "business_date", "variance"], limit_page_length=0)
+	past = [r for r in rows if str(r.business_date) < bd]
+	everyone = [abs(flt(r.variance)) for r in past]
+	items = []
+	for r in rows:
+		if str(r.business_date) != bd or not flt(r.variance):
+			continue
+		x = abs(flt(r.variance))
+		mine = [abs(flt(p.variance)) for p in past if p.user == r.user]
+		# ponytail: sd floor of 1 currency unit; a per-currency floor if
+		# small-unit currencies flag too often
+		for base, whose in ((mine, "this cashier's"), (everyone, "the property's")):
+			hit = _spike(x, base, floor=1.0)
+			if hit:
+				items.append({
+					"kind": "cash_variance", "who": r.user, "value": flt(r.variance),
+					"reason": f"Till over/short by {flt(r.variance):,.2f}; {whose} usual "
+					          f"is {hit[0]:,.2f} (sd {hit[1]:,.2f}).",
+					"sources": [{"doctype": "Cashier Session", "name": r.name}]})
+				break
+	return items
+
+
+def _rate_outliers(property: str, bd: str) -> list[dict]:
+	"""Room nights posted today far above or below what that room type
+	usually posts."""
+	from statistics import fmean, pstdev
+
+	from frappe.utils import add_days
+
+	from kamra.folio import STANDS_ON_ITS_DATE
+	rows = frappe.db.sql(
+		"""SELECT fc.name, fc.parent AS folio, fc.posting_date, fc.amount,
+		          r.room_type, r.name AS reservation
+		   FROM `tabFolio Charge` fc
+		   JOIN `tabFolio` f ON fc.parent = f.name
+		   JOIN `tabReservation` r
+		     ON r.name = COALESCE(NULLIF(fc.reservation, ''), f.reservation)
+		   WHERE f.property = %(p)s AND fc.charge_type = 'Room' AND fc.amount > 0
+		     AND fc.posting_date BETWEEN %(since)s AND %(d)s
+		     AND """ + STANDS_ON_ITS_DATE,
+		{"p": property, "since": str(add_days(bd, -HISTORY_DAYS)), "d": bd},
+		as_dict=True)
+	hist: dict[str, list[float]] = {}
+	for r in rows:
+		if str(r.posting_date) < bd:
+			hist.setdefault(r.room_type, []).append(flt(r.amount))
+	items = []
+	for r in rows:
+		h = hist.get(r.room_type, [])
+		if str(r.posting_date) != bd or len(h) < MIN_SAMPLES:
+			continue
+		mean = fmean(h)
+		# a room type always sold at one price still varies a little
+		sd = max(pstdev(h), 0.05 * mean)
+		if abs(flt(r.amount) - mean) <= ANOMALY_Z * sd:
+			continue
+		items.append({
+			"kind": "rate", "who": r.reservation, "value": flt(r.amount),
+			"reason": f"Room night posted at {flt(r.amount):,.2f}; "
+			          f"{(r.room_type or '').split('-')[-1]} usually posts "
+			          f"{mean:,.2f} (sd {sd:,.2f}).",
+			"sources": [{"doctype": "Folio", "name": r.folio},
+			            {"doctype": "Reservation", "name": r.reservation}]})
+	return items
+
+
+def _no_show_sources(property: str, bd: str) -> list[dict]:
+	"""Sources (travel agent, company, channel) whose recent arrivals no-show
+	far more often than the property's arrivals do."""
+	from frappe.utils import add_days
+	rows = frappe.get_all(
+		"Reservation",
+		filters={"property": property, "status": ("!=", "Cancelled"),
+		         "check_in_date": ("between", [str(add_days(bd, -HISTORY_DAYS * 2)), bd])},
+		fields=["name", "status", "check_in_date", "travel_agent", "company",
+		        "channel", "source"], limit_page_length=0)
+	if not rows:
+		return []
+	base_rate = sum(r.status == "No Show" for r in rows) / len(rows)
+	recent = str(add_days(bd, -NO_SHOW_WINDOW))
+	groups: dict[str, list] = {}
+	for r in rows:
+		if str(r.check_in_date) < recent:
+			continue
+		key = r.travel_agent or r.company or r.channel or r.source
+		if key:
+			groups.setdefault(key, []).append(r)
+	items = []
+	for key, res in groups.items():
+		ns = [r for r in res if r.status == "No Show"]
+		rate = len(ns) / len(res)
+		if len(ns) < MIN_COUNT or rate < NO_SHOW_RATIO * max(base_rate, 0.01):
+			continue
+		items.append({
+			"kind": "no_shows", "who": key, "value": len(ns),
+			"reason": f"{len(ns)} of {len(res)} arrivals from {key} no-showed in "
+			          f"{NO_SHOW_WINDOW} days ({rate:.0%}); the property's rate is "
+			          f"{base_rate:.0%}.",
+			"sources": [{"doctype": "Reservation", "name": r.name} for r in ns]})
+	return items
+
+
+def check_anomalies(property: str, bd: str) -> dict:
+	days = _history_days(property, bd)
+	on = cint(_setting(property, "na_anomaly_checks"))
+	ready = on and days >= MIN_HISTORY_DAYS
+	items = []
+	if ready:
+		items = (_void_and_allowance_spikes(property, bd)
+		         + _cash_variance_outliers(property, bd)
+		         + _rate_outliers(property, bd)
+		         + _no_show_sources(property, bd))
+	# a flag must say why and point at its rows
+	items = [i for i in items if i["reason"] and i["sources"]]
+	return _check(
+		"anomalies", "Unusual against this property's history", "warn", items,
+		"Look at each flag's rows: confirm it was expected, or follow it up "
+		"with the person or source named.", None,
+		enabled=bool(on), history_days=days, min_history_days=MIN_HISTORY_DAYS,
+		ready=bool(ready))
+
+
 def run_checks(property: str, business_date: str | None = None,
                run_at=None) -> list[dict]:
 	"""Every pre-check for the business date, in checklist order."""
@@ -677,6 +907,7 @@ def run_checks(property: str, business_date: str | None = None,
 		check_overdue_ar(property),
 		check_room_status(property),
 		check_vacant_rooms(property),
+		check_anomalies(property, bd),
 	]
 
 
@@ -977,12 +1208,19 @@ def recover_stuck_business_date(property: str):
 
 @frappe.whitelist()
 @require_roles(*AUDIT_ROLES)
-def night_audit_history(property: str, limit: int = 20):
-	"""Recent Night Audit Runs of a property, newest first, with whether
-	each has a saved audit pack."""
+def night_audit_history(property: str, limit: int = 20, from_date: str | None = None,
+                        to_date: str | None = None):
+	"""Night Audit Runs of a property, newest first, with whether each has a
+	saved audit pack. from_date/to_date narrow it to business dates in that
+	range (a year of nights fits under the cap)."""
 	from kamra.crs import assert_property_access
 	assert_property_access(property)
-	limit = max(1, min(cint(limit) or 20, 100))
+	limit = max(1, min(cint(limit) or 20, 400))
+	if from_date and to_date and getdate(from_date) > getdate(to_date):
+		frappe.throw(frappe._("The start date is after the end date."))
+	args = {"p": property, "n": limit,
+	        "f": getdate(from_date) if from_date else None,
+	        "t": getdate(to_date) if to_date else None}
 	rows = frappe.db.sql(
 		"""
 		SELECT name, business_date, status, room_charges_posted, amount_posted,
@@ -991,9 +1229,11 @@ def night_audit_history(property: str, limit: int = 20):
 		       (IFNULL(report_pack, '') != '') AS has_pack
 		FROM `tabNight Audit Run`
 		WHERE property = %(p)s AND status != 'Draft'
+		  AND (%(f)s IS NULL OR business_date >= %(f)s)
+		  AND (%(t)s IS NULL OR business_date <= %(t)s)
 		ORDER BY business_date DESC, creation DESC
 		LIMIT %(n)s
-		""", {"p": property, "n": limit}, as_dict=True)
+		""", args, as_dict=True)
 	for r in rows:
 		r["business_date"] = _iso(r.business_date)
 		r["creation"] = _iso(r.creation)
@@ -1309,6 +1549,7 @@ def build_pack(property: str, bd: str, *, checks: list[dict],
 	_section(pack, "city_ledger",
 	         lambda: _raw(ledger.city_ledger_aging)(property))
 	_section(pack, "cancellations", lambda: _cancellations(property, bd))
+	_section(pack, "no_show_credits", lambda: no_show_credits(property))
 	pack["notes"] = summary.get("notes")
 	pack["reports"] = [{"key": k, "title": t} for k, t in REPORTS]
 	return pack
@@ -1663,16 +1904,13 @@ def eod_acknowledge(property: str, key: str, reason: str):
 	return {"audit": doc.name, "acknowledgement": row, "acknowledgements": acks}
 
 
-@frappe.whitelist(methods=["POST"])
-@require_roles("Front Desk", "Night Auditor", "Hotel Admin", "Kamra Agent")
-def eod_mark_no_show(reservation: str, reason: str | None = None):
-	"""End of Day: mark an arrival that did not come a No Show now, with the
-	property's no-show fee policy applied exactly as the audit applies it
-	(fee posted on the business date, or waived for an OTA booking)."""
-	from kamra import no_show
+NO_SHOW_ROLES = ("Front Desk", "Night Auditor", "Hotel Admin", "Kamra Agent")
+
+
+def _no_show_target(reservation: str):
+	"""The arrival a desk no-show acts on, refused unless it is a Confirmed
+	stay due on or before the business date. Returns (res, business date)."""
 	from kamra.business_date import get_business_date
-	from kamra.folio import apply_no_show
-	from kamra.savings import log_action
 	res = frappe.get_doc("Reservation", reservation)
 	bd = get_business_date(res.property)
 	if res.status != "Confirmed":
@@ -1680,16 +1918,101 @@ def eod_mark_no_show(reservation: str, reason: str | None = None):
 		               "(this one is {0}).").format(res.status))
 	if getdate(res.check_in_date) > getdate(bd):
 		frappe.throw(_("This arrival is due on {0}, after the business date "
-		               "{1}.").format(res.check_in_date, bd))
+		             "{1}.").format(res.check_in_date, bd))
+	return res, bd
+
+
+def _credit_default(property: str) -> str:
+	return (frappe.db.get_value("Property", property, "no_show_credit_default")
+	        or "Refund")
+
+
+@frappe.whitelist()
+@require_roles(*NO_SHOW_ROLES)
+def no_show_preview(reservation: str):
+	"""What marking this arrival a no-show will do, for the confirm step on
+	Today, the reservation and End of Day: the fee the policy posts (pre-tax
+	and with tax, the same numbers apply_no_show posts) or why there is none,
+	what is already paid, and the credit left for the guest afterwards with
+	the property's default for it (refund or keep)."""
+	from kamra import no_show
+	from kamra.folio import _room_gst, policy_fee
+	res, _bd = _no_show_target(reservation)
+	pol = no_show.policy(res.property)
+	d = no_show.fee_decision(res, pol)
+	fee = flt(policy_fee(res, pol.charge), 2) if d.fee == "charge" else 0.0
+	fee_total = flt(fee * (1 + flt(_room_gst(res)) / 100), 2) if fee else 0.0
+	balance = flt(frappe.db.get_value(
+		"Folio", {"reservation": res.name, "folio_type": "Guest",
+		          "status": ("!=", "Closed")}, "balance") or 0)
+	paid = flt(frappe.db.sql(
+		"""SELECT COALESCE(SUM(fp.amount), 0) FROM `tabFolio Payment` fp
+		   JOIN `tabFolio` f ON fp.parent = f.name
+		   WHERE f.reservation = %s AND f.folio_type = 'Guest'""",
+		res.name)[0][0] or 0, 2)
+	return {
+		"reservation": res.name, "guest_name": res.guest_name,
+		"check_in_date": str(res.check_in_date),
+		"fee": d.fee, "fee_reason": d.reason, "fee_basis": pol.charge,
+		"fee_amount": fee, "fee_total": fee_total,
+		"paid": paid,
+		"credit_after": flt(max(0.0, -(balance + fee_total)), 2),
+		"credit_default": _credit_default(res.property),
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+@require_roles(*NO_SHOW_ROLES)
+def eod_mark_no_show(reservation: str, reason: str | None = None):
+	"""Mark an arrival that did not come a No Show now - from Today, the
+	reservation or End of Day - with the property's no-show fee policy
+	applied exactly as the audit applies it (fee posted on the business
+	date, or waived for an OTA booking). The room is free at once: the
+	channels get a push and open desk screens refresh. `credit` is what the
+	guest paid beyond the fee; settle it with settle_no_show_credit."""
+	from kamra import no_show
+	from kamra.folio import apply_no_show
+	from kamra.savings import log_action
+	res, bd = _no_show_target(reservation)
 	pol = no_show.policy(res.property)
 	ns = apply_no_show(res, pol, no_show.fee_decision(res, pol), bd)
+	ns["credit_default"] = _credit_default(res.property)
 	log_action("no_show", "Reservation", res.name, res.property,
-	           rationale=f"{res.name} ({res.guest_name}) marked no-show at End "
-	                     f"of Day: {ns['outcome']}"
+	           rationale=f"{res.name} ({res.guest_name}) marked no-show at the "
+	                     f"desk: {ns['outcome']}"
 	                     + (f" - {reason.strip()}" if (reason or "").strip() else ""),
 	           channel="MCP" if frappe.flags.get("kamra_agent_call") else "Desk",
 	           after_snapshot=ns)
 	return ns
+
+
+@frappe.whitelist(methods=["POST"])
+@require_roles("Front Desk", "Finance", "Hotel Admin", "Kamra Agent")
+def settle_no_show_credit(reservation: str, action: str, reason: str,
+                          mode: str | None = None, pin: str | None = None):
+	"""A no-show paid more than its fee: refund the rest to the guest (the
+	refund writer, so till and ledger move) or keep it as a forfeited
+	deposit, with a reason. Same roles as a folio refund."""
+	from kamra.folio import settle_no_show_credit as settle
+	return settle(frappe.get_doc("Reservation", reservation), action, reason,
+	              mode=mode, pin=pin)
+
+
+def no_show_credits(property: str) -> list[dict]:
+	"""No Shows whose guest folio still holds money for the guest - a refund
+	or a forfeit decision for the morning (audit pack)."""
+	rows = frappe.db.sql(
+		"""SELECT r.name, r.guest_name, r.check_in_date, -f.balance AS credit
+		   FROM `tabReservation` r
+		   JOIN `tabFolio` f ON f.reservation = r.name AND f.folio_type = 'Guest'
+		   WHERE r.property = %s AND r.status = 'No Show'
+		     AND f.status != 'Closed' AND f.balance < -0.01
+		   ORDER BY r.check_in_date, r.name LIMIT %s""",
+		(property, MAX_ITEMS), as_dict=True)
+	default = _credit_default(property)
+	return [{"reservation": r.name, "guest_name": r.guest_name,
+	         "check_in_date": str(r.check_in_date), "credit": flt(r.credit, 2),
+	         "default": default} for r in rows]
 
 
 @frappe.whitelist()

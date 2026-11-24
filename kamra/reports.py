@@ -11,13 +11,28 @@ import frappe
 from frappe.utils import add_days, getdate, nowdate
 
 from kamra.authz import require_roles
+from kamra.folio import STANDS_ON_ITS_DATE
+
+
+def _out_of_order(property: str, date: str, open_date: bool) -> int:
+	"""Rooms not for sale on date: Out of Order now for the open business
+	date (as dashboards._sellable), else under an Active Maintenance block."""
+	if open_date:
+		return frappe.db.count("Room", {
+			"property": property, "housekeeping_status": "Out of Order"})
+	return int(frappe.db.sql(
+		"""
+		SELECT COUNT(DISTINCT room) FROM `tabRoom Block`
+		WHERE property = %(p)s AND block_status = 'Active'
+		  AND reason = 'Maintenance' AND from_date <= %(d)s AND to_date > %(d)s
+		""", {"p": property, "d": date})[0][0] or 0)
 
 
 def _day_stats(property: str, date: str, total_rooms: int) -> dict:
 	row = frappe.db.sql(
 		"""
 		SELECT
-		  COUNT(DISTINCT CASE WHEN fc.charge_type = 'Room'
+		  COUNT(DISTINCT CASE WHEN fc.charge_type = 'Room' AND """ + STANDS_ON_ITS_DATE + """
 		        THEN COALESCE(fc.reservation, f.reservation) END) AS rooms_sold,
 		  COALESCE(SUM(CASE WHEN fc.charge_type IN ('Room', 'Rate Adjustment')
 		        THEN fc.amount ELSE 0 END), 0) AS room_revenue,
@@ -26,8 +41,11 @@ def _day_stats(property: str, date: str, total_rooms: int) -> dict:
 		        AS fnb_revenue,
 		  COALESCE(SUM(CASE WHEN fc.charge_type NOT IN ('Room', 'Rate Adjustment',
 		        'Food & Beverage', 'Meal Plan', 'Minibar', 'Discount',
-		        'Opening Balance')
-		        THEN fc.amount ELSE 0 END), 0) AS other_revenue
+		        'Opening Balance', 'Allowance')
+		        THEN fc.amount ELSE 0 END), 0) AS other_revenue,
+		  -- a credit to the guest, not a revenue stream: its own figure
+		  COALESCE(SUM(CASE WHEN fc.charge_type = 'Allowance'
+		        THEN fc.amount ELSE 0 END), 0) AS allowances
 		FROM `tabFolio Charge` fc
 		JOIN `tabFolio` f ON fc.parent = f.name
 		WHERE f.property = %(p)s AND fc.posting_date = %(d)s
@@ -37,7 +55,8 @@ def _day_stats(property: str, date: str, total_rooms: int) -> dict:
 	rev = float(row.room_revenue or 0)
 	fnb = float(row.fnb_revenue or 0)
 	other = float(row.other_revenue or 0)
-	total_rev = rev + fnb + other
+	allowances = float(row.allowances or 0)
+	total_rev = rev + fnb + other + allowances
 	# guests (pax) in-house that night — the denominator for RevPAX
 	pax = int(frappe.db.sql(
 		"""
@@ -47,14 +66,34 @@ def _day_stats(property: str, date: str, total_rooms: int) -> dict:
 		  AND check_in_date <= %(d)s AND check_out_date > %(d)s
 		""",
 		{"p": property, "d": date})[0][0] or 0)
+	# occupancy as OPERA's manager report counts it: rooms occupied over
+	# rooms not out of order. Room nights post at night audit, so until the
+	# audit closes the date the rooms occupied are the rooms in house.
+	from kamra.business_date import get_business_date
+	in_house = getdate(date) >= getdate(get_business_date(property))
+	occupied = sold
+	if in_house:
+		occupied = int(frappe.db.sql(
+			"""
+			SELECT COUNT(DISTINCT COALESCE(NULLIF(room, ''), name))
+			FROM `tabReservation`
+			WHERE property = %(p)s AND status = 'Checked In'
+			  AND check_in_date <= %(d)s
+			""",
+			{"p": property, "d": date})[0][0] or 0)
+	available = max(total_rooms - _out_of_order(property, date, in_house), 0)
 	return {
 		"date": str(date),
 		"rooms_sold": sold,
+		"rooms_occupied": occupied,
+		"available_rooms": available,
+		"occupancy_basis": "in_house" if in_house else "posted",
 		"pax": pax,
-		"occupancy_pct": round(100 * sold / total_rooms, 1) if total_rooms else 0,
+		"occupancy_pct": round(100 * occupied / available, 1) if available else 0,
 		"room_revenue": rev,
 		"fnb_revenue": fnb,
 		"other_revenue": other,
+		"allowances": allowances,
 		"total_revenue": total_rev,
 		"adr": round(rev / sold, 0) if sold else 0,
 		"revpar": round(rev / total_rooms, 0) if total_rooms else 0,
@@ -166,6 +205,7 @@ def manager_flash(property: str, date: str | None = None,
 	start = from_date or date
 	report_range_end(start, date)
 	total_rooms = frappe.db.count("Room", {"property": property}) or 0
+	sellable = max(total_rooms - _out_of_order(property, date, True), 0)
 
 	month = _days(property, getdate(date).replace(day=1), getdate(date), total_rooms)
 	days = _days(property, getdate(start), getdate(date), total_rooms)
@@ -186,18 +226,100 @@ def manager_flash(property: str, date: str | None = None,
 			""", {"p": property, "d": od})[0][0]
 		outlook.append({
 			"date": od, "booked": int(booked),
-			"occupancy_pct": round(100 * booked / total_rooms, 1)
-			if total_rooms else 0,
+			"occupancy_pct": round(100 * booked / sellable, 1)
+			if sellable else 0,
 		})
 
 	return {
 		"date": str(date), "from_date": str(start), "total_rooms": total_rooms,
+		"available_rooms": days[-1]["available_rooms"],
 		"today": days[-1] if len(days) == 1 else _sum_days(days, total_rooms),
 		"mtd": _sum_days(month, total_rooms), "movement": movement,
 		"collections": collections,
 		"trend": days if len(days) > 1 else month[-14:],
 		"outlook": outlook,
 	}
+
+
+# ── Business date and daily KPI snapshot (#542) ──────────────────────────────
+
+KPI_RANGE_DAYS = 366
+
+
+@frappe.whitelist()
+@require_roles("Front Desk", "Finance", "Revenue Manager", "Night Auditor",
+               "Housekeeping", "Kamra Agent")
+def business_date(property: str):
+	"""The property's open business date (the day the night audit closes
+	next) and the calendar date, so a connected app dates what it posts."""
+	from kamra.business_date import get_business_date
+	return {"property": property, "business_date": get_business_date(property),
+	        "calendar_date": nowdate()}
+
+
+def kpi_figures(property: str, date: str) -> dict:
+	"""One date's figures as the manager flash shows them (its "today" and
+	collections), plus the AR ledger balance at that date."""
+	from kamra.api import cash_summary
+	from kamra.ledger import ledger_balances
+	total_rooms = frappe.db.count("Room", {"property": property}) or 0
+	day = _day_stats(property, str(date), total_rooms)
+	collections = cash_summary(property, str(date), str(date))
+	ar = next(row["balance"] for row in ledger_balances(property, str(date))["ledgers"]
+	          if row["ledger"] == "AR")
+	return {**day, "total_rooms": total_rooms,
+	        "revenue_by_group": {"rooms": day["room_revenue"], "fnb": day["fnb_revenue"],
+	                             "other": day["other_revenue"],
+	                             "allowances": day["allowances"]},
+	        "collections": collections, "ar_balance": round(float(ar), 2)}
+
+
+def write_kpi_snapshot(property: str, date: str) -> str:
+	"""Store a closed business date's figures once. The night audit calls it
+	after the date rolls; a second call for the same date keeps the first
+	snapshot (the unique key refuses a duplicate even from two workers)."""
+	key = f"{property}:{date}"
+	if frappe.db.exists("Daily KPI Snapshot", key):
+		return key
+	f = kpi_figures(property, date)
+	try:
+		frappe.get_doc({
+			"doctype": "Daily KPI Snapshot", "snapshot_key": key,
+			"property": property, "business_date": str(date),
+			"occupancy_pct": f["occupancy_pct"], "adr": f["adr"], "revpar": f["revpar"],
+			"room_revenue": f["room_revenue"], "total_revenue": f["total_revenue"],
+			"collections_total": float(f["collections"].get("grand_total") or 0),
+			"ar_balance": f["ar_balance"],
+			"figures": json.dumps(f, default=str),
+		}).insert(ignore_permissions=True)
+	except frappe.DuplicateEntryError:
+		pass
+	return key
+
+
+@frappe.whitelist()
+@require_roles("Finance", "Revenue Manager", "Night Auditor", "Kamra Agent")
+def kpi_snapshots(property: str, from_date: str, to_date: str | None = None):
+	"""The daily KPI snapshots of closed business dates from_date..to_date
+	(both included, at most 366 days), oldest first. A date with no
+	snapshot (not closed yet, or closed before snapshots existed) is
+	absent, never estimated."""
+	from frappe.utils import date_diff
+	to_date = to_date or from_date
+	if getdate(to_date) < getdate(from_date):
+		frappe.throw("to_date is before from_date.")
+	if date_diff(to_date, from_date) + 1 > KPI_RANGE_DAYS:
+		frappe.throw(f"Ask for at most {KPI_RANGE_DAYS} days at a time.")
+	rows = frappe.get_all(
+		"Daily KPI Snapshot",
+		filters={"property": property,
+		         "business_date": ["between", [str(from_date), str(to_date)]]},
+		fields=["business_date", "figures", "creation"],
+		order_by="business_date asc", limit_page_length=0)
+	return {"property": property, "from_date": str(from_date), "to_date": str(to_date),
+	        "snapshots": [{**json.loads(r.figures or "{}"),
+	                       "business_date": str(r.business_date),
+	                       "written_at": str(r.creation)} for r in rows]}
 
 
 def _days(property: str, d, end, total_rooms: int) -> list[dict]:
@@ -211,14 +333,18 @@ def _days(property: str, d, end, total_rooms: int) -> list[dict]:
 def _sum_days(days: list[dict], total_rooms: int) -> dict:
 	"""Several days' stats as one: totals, with rates over the whole span."""
 	tot = {k: sum(d[k] for d in days) for k in
-	       ("rooms_sold", "pax", "room_revenue", "fnb_revenue", "other_revenue",
-	        "total_revenue")}
+	       ("rooms_sold", "rooms_occupied", "available_rooms", "pax", "room_revenue",
+	        "fnb_revenue", "other_revenue", "total_revenue")}
 	n = total_rooms * len(days)
+	avail = tot["available_rooms"]
 	return {**tot,
-	        "occupancy_pct": round(100 * tot["rooms_sold"] / n, 1) if n else 0,
+	        "occupancy_basis": "in_house" if any(
+	            d["occupancy_basis"] == "in_house" for d in days) else "posted",
+	        "occupancy_pct": round(100 * tot["rooms_occupied"] / avail, 1) if avail else 0,
 	        "adr": round(tot["room_revenue"] / tot["rooms_sold"], 0) if tot["rooms_sold"] else 0,
 	        "revpar": round(tot["room_revenue"] / n, 0) if n else 0,
-	        "revpax": round(tot["total_revenue"] / tot["pax"], 0) if tot["pax"] else 0}
+	        "revpax": round(tot["total_revenue"] / tot["pax"], 0) if tot["pax"] else 0,
+	        "allowances": sum(d["allowances"] for d in days)}
 
 
 def range_stats(property: str, start, end, total_rooms: int) -> dict:
@@ -228,7 +354,7 @@ def range_stats(property: str, start, end, total_rooms: int) -> dict:
 	row = frappe.db.sql(
 		"""
 		SELECT
-		  COUNT(DISTINCT CASE WHEN fc.charge_type = 'Room' THEN CONCAT(
+		  COUNT(DISTINCT CASE WHEN fc.charge_type = 'Room' AND """ + STANDS_ON_ITS_DATE + """ THEN CONCAT(
 		        COALESCE(fc.reservation, f.reservation), '|', fc.posting_date) END)
 		        AS rooms_sold,
 		  COALESCE(SUM(CASE WHEN fc.charge_type = 'Room'
@@ -294,11 +420,12 @@ def budget_vs_actual(property: str, period: str | None = None):
 	agg = frappe.db.sql(
 		"""
 		SELECT
-		  COUNT(DISTINCT CASE WHEN fc.charge_type='Room'
+		  COUNT(DISTINCT CASE WHEN fc.charge_type='Room' AND """ + STANDS_ON_ITS_DATE + """
 		        THEN CONCAT(COALESCE(fc.reservation,f.reservation),'|',fc.posting_date) END) AS rooms_sold,
 		  COALESCE(SUM(CASE WHEN fc.charge_type IN ('Room','Rate Adjustment')
 		                    THEN fc.amount ELSE 0 END),0) AS room_revenue,
-		  MAX(CASE WHEN fc.charge_type='Room' THEN fc.posting_date END) AS posted_through
+		  MAX(CASE WHEN fc.charge_type='Room' AND """ + STANDS_ON_ITS_DATE + """
+		      THEN fc.posting_date END) AS posted_through
 		FROM `tabFolio Charge` fc JOIN `tabFolio` f ON fc.parent=f.name
 		WHERE f.property=%(p)s AND fc.posting_date>=%(s)s AND fc.posting_date<%(n)s
 		""",
@@ -326,6 +453,7 @@ def budget_vs_actual(property: str, period: str | None = None):
 		       COUNT(DISTINCT fc.posting_date)
 		FROM `tabFolio Charge` fc JOIN `tabFolio` f ON fc.parent=f.name
 		WHERE f.property=%(p)s AND fc.charge_type='Room'
+		  AND """ + STANDS_ON_ITS_DATE + """
 		  AND fc.posting_date>=%(s)s AND fc.posting_date<%(e)s
 		GROUP BY res
 		""",
@@ -563,3 +691,37 @@ def sla_report(property: str, from_date: str, to_date: str):
 		"open_total": len(open_all),
 		"unassigned_open": sum(1 for t in open_all if not t.assigned_to_user),
 	}
+
+
+@frappe.whitelist()
+@require_roles("Revenue Manager", "Hotel Admin", "Front Desk", "Kamra Agent")
+def booking_link_sources(property: str, from_date: str | None = None,
+                         to_date: str | None = None):
+	"""Bookings made from booking links, per source tag (#560): how many,
+	room nights and booked value, by the date the booking was made
+	(default: the last 90 days). Cancelled bookings are left out."""
+	from frappe.utils import date_diff
+
+	from kamra.authz import assert_property_access
+	assert_property_access(property)
+	to_date = str(getdate(to_date or nowdate()))
+	from_date = str(getdate(from_date or add_days(to_date, -90)))
+	if date_diff(to_date, from_date) > 366:
+		frappe.throw("Pick at most a year.")
+	rows = frappe.db.sql(
+		"""SELECT source_tag AS tag, COUNT(*) AS bookings,
+		          COALESCE(SUM(DATEDIFF(check_out_date, check_in_date)), 0) AS room_nights,
+		          COALESCE(SUM(amount_after_tax), 0) AS amount
+		   FROM `tabReservation`
+		   WHERE property = %s AND IFNULL(source_tag, '') != ''
+		     AND status != 'Cancelled' AND DATE(creation) BETWEEN %s AND %s
+		   GROUP BY source_tag ORDER BY bookings DESC, source_tag""",
+		(property, from_date, to_date), as_dict=True)
+	for r in rows:
+		r["amount"] = round(float(r["amount"] or 0), 2)
+		r["room_nights"] = int(r["room_nights"] or 0)
+	from frappe.utils import cint
+
+	from kamra.settings import get_setting
+	return {"from_date": from_date, "to_date": to_date, "rows": rows,
+	        "enabled": bool(cint(get_setting(property, "booking_links")))}

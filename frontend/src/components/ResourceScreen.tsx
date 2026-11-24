@@ -26,6 +26,7 @@ import ImageField from "./ImageField"
 import { fmtAmount } from "../lib/money"
 import { useT, t as translate, useUILanguage } from "../lib/i18n"
 import { useAuth } from "../lib/auth"
+import { downloadCsv } from "../lib/csv"
 
 const BACKDATE_ROLES = ["Finance", "Hotel Admin", "System Manager", "Administrator"]
 
@@ -69,6 +70,8 @@ export type FilterSpec = {
   label: string
   /** static options */
   options?: string[]
+  /** what each static option shows, when its value is a code (e.g. "1") */
+  optionLabels?: Record<string, string>
 } & Partial<Omit<OptionSource, "linkDoctype">> & { linkDoctype?: string; optionsFrom?: "Floor" }
 
 type Opt = { value: string; label: string }
@@ -104,6 +107,7 @@ export interface FieldSpec {
     | "date"
     | "link"
     | "readonly"
+    | "password"
     | "image"
     | "tags"
   options?: string[] // for select / tags (static fallback)
@@ -377,6 +381,17 @@ function FieldInput(props: {
       return (
         <input className={inputCls} disabled value={String(value ?? "")} />
       )
+    case "password":
+      // a stored secret is never shown nor sent back: always empty on open
+      return (
+        <input
+          type="password"
+          autoComplete="new-password"
+          className={inputCls}
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )
     case "image":
       return (
         <ImageField
@@ -588,20 +603,11 @@ export function ResourceScreen({
       limit: 2000,
     })
     const cols = visibleCols
-    const esc = (v: unknown) => {
-      const t = String(v ?? "")
-      return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t
-    }
-    const csv = [
-      cols.map((c) => esc(c.label)).join(","),
-      ...all.map((r) => cols.map((c) => esc(r[c.field])).join(",")),
-    ].join("\n")
-    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" })
-    const a = document.createElement("a")
-    a.href = URL.createObjectURL(blob)
-    a.download = `${config.doctype.toLowerCase().replace(/ /g, "-")}-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(a.href)
+    downloadCsv(
+      `${config.doctype.toLowerCase().replace(/ /g, "-")}-${new Date().toISOString().slice(0, 10)}`,
+      cols.map((c) => c.label),
+      all.map((r) => cols.map((c) => r[c.field] as string | number | null)),
+    )
   }
 
   // load link options and menu master lists once per screen
@@ -646,11 +652,17 @@ export function ResourceScreen({
     }
     // List rows only carry column fields - fetch the full document so
     // form extras (location, slugs, etc.) aren't blank and can't wipe DB values.
-    setDraft({ ...row })
+    const secrets = config.form.filter((f) => f.type === "password").map((f) => f.field)
+    const withoutSecrets = (doc: Row) => {
+      const copy: Record<string, unknown> = { ...doc }
+      for (const field of secrets) delete copy[field]
+      return copy
+    }
+    setDraft(withoutSecrets(row))
     frappeFetch<{ data: Row }>(
       `/api/resource/${encodeURIComponent(config.doctype)}/${encodeURIComponent(row.name)}`,
     )
-      .then((r) => setDraft(r.data))
+      .then((r) => setDraft(withoutSecrets(r.data)))
       .catch((e) => setError(serverError(e)))
   }
 
@@ -661,6 +673,8 @@ export function ResourceScreen({
       const payload: Record<string, unknown> = {}
       for (const f of config.form) {
         if (f.type === "readonly") continue
+        // an empty secret keeps the stored one
+        if (f.type === "password" && !draft[f.field]) continue
         if (f.field in draft) payload[f.field] = draft[f.field]
       }
       if (config.propertyScoped) payload.property = getCurrentProperty()
@@ -744,7 +758,7 @@ export function ResourceScreen({
                 {f.options
                   ? f.options.map((o) => (
                       <option key={o} value={o}>
-                        {t(o)}
+                        {t(f.optionLabels?.[o] ?? o)}
                       </option>
                     ))
                   : (filterOpts[f.field] ?? []).map((o) => (

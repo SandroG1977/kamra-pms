@@ -27,6 +27,7 @@ import frappe
 from frappe.utils import add_days, date_diff, flt, getdate
 
 from kamra.authz import require_roles
+from kamra.folio import NOT_VOIDED, STANDS_ON_ITS_DATE
 
 FOLIO_SKIP = ("Opening Balance", "Room Levy")
 FNB_TYPES = ("Food & Beverage",)
@@ -37,7 +38,7 @@ def _folio(property: str, start, end) -> dict:
 	row = frappe.db.sql(
 		"""
 		SELECT
-		  COUNT(DISTINCT CASE WHEN fc.charge_type = 'Room' THEN
+		  COUNT(DISTINCT CASE WHEN fc.charge_type = 'Room' AND """ + STANDS_ON_ITS_DATE + """ THEN
 		        CONCAT(COALESCE(fc.reservation, f.reservation), fc.posting_date) END)
 		        AS room_nights,
 		  COALESCE(SUM(CASE WHEN fc.charge_type IN ('Room', 'Discount')
@@ -48,16 +49,47 @@ def _folio(property: str, start, end) -> dict:
 		        THEN fc.amount END), 0) AS food,
 		  COALESCE(SUM(CASE WHEN fc.charge_type IN %(fnb)s AND fc.is_alcohol = 1
 		        THEN fc.amount END), 0) AS beverage,
-		  COALESCE(SUM(CASE WHEN fc.charge_type NOT IN ('Room', 'Discount', 'Meal Plan', 'Minibar')
+		  COALESCE(SUM(CASE WHEN fc.charge_type = 'Allowance'
+		        THEN fc.amount END), 0) AS allowances,
+		  COALESCE(SUM(CASE WHEN fc.charge_type NOT IN ('Room', 'Discount', 'Meal Plan', 'Minibar', 'Allowance')
 		        AND fc.charge_type NOT IN %(fnb)s AND fc.charge_type NOT IN %(skip)s
 		        THEN fc.amount END), 0) AS other
+		""" + _FOLIO_FROM, {"p": property, "s": start, "e": end, "skip": FOLIO_SKIP,
+		                     "fnb": FNB_TYPES}, as_dict=True)[0]
+	return {k: flt(v) for k, v in row.items()}
+
+
+# outlet bills and banquets are counted from their own records, so the folio
+# lines they post are left out here
+_FOLIO_FROM = """
 		FROM `tabFolio Charge` fc JOIN `tabFolio` f ON fc.parent = f.name
 		WHERE f.property = %(p)s AND fc.posting_date BETWEEN %(s)s AND %(e)s
 		  AND IFNULL(fc.description, '') NOT LIKE '%%(ORD-%%'
 		  AND IFNULL(fc.description, '') NOT LIKE 'EVT-%%'
-		""", {"p": property, "s": start, "e": end, "skip": FOLIO_SKIP, "fnb": FNB_TYPES},
-		as_dict=True)[0]
-	return {k: flt(v) for k, v in row.items()}
+"""
+
+
+def departments(property: str, start, end) -> list[dict]:
+	"""Revenue by operating department for a date range: rooms, each outlet,
+	banquets, then each minor department (laundry, spa, taxi...) on its own
+	line. Same figures as the night audit report, which sums the minor ones
+	as "other"."""
+	p = _period(property, "", start, end, 0)
+	outlets = sum(o["total"] for o in p["outlets"])
+	rows = [("Rooms", p["room_revenue"])]
+	rows += [(o["name"], o["total"]) for o in p["outlets"]]
+	rows += [("Food and beverage on folios", p["food"] + p["beverage"] - outlets),
+	         ("Banquets", p["banquets"]),
+	         ("Meal plans and minibar", p["meal_plan_minibar"])]
+	rows += frappe.db.sql(
+		"""SELECT fc.charge_type, SUM(fc.amount)""" + _FOLIO_FROM + """
+		  AND fc.charge_type NOT IN ('Room', 'Discount', 'Meal Plan', 'Minibar', 'Allowance')
+		  AND fc.charge_type NOT IN %(fnb)s AND fc.charge_type NOT IN %(skip)s
+		GROUP BY fc.charge_type ORDER BY fc.charge_type""",
+		{"p": property, "s": start, "e": end, "skip": FOLIO_SKIP, "fnb": FNB_TYPES})
+	rows.append(("Discounts and allowances", p["allowances"]))
+	return [{"department": frappe._(name), "amount": round(flt(amt), 2)}
+	        for name, amt in rows if name == "Rooms" or round(flt(amt), 2)]
 
 
 def _outlets(property: str, start, end) -> list[dict]:
@@ -74,8 +106,20 @@ def _outlets(property: str, start, end) -> list[dict]:
 		  AND COALESCE(o.business_date, DATE(o.creation)) BETWEEN %(s)s AND %(e)s
 		GROUP BY o.name
 		""", {"p": property, "s": start, "e": end}, as_dict=True)
+	# a bill charged to a room is revenue only while its charge stands on a
+	# folio: a void at the desk reverses the line (a transfer keeps the order
+	# number in it) but leaves the order Delivered, so it counted as sold
+	to_room = [r.bill for r in rows if not r.paid]
+	on_folio = {o for (o,) in frappe.db.sql(
+		"""SELECT o.name FROM `tabPOS Order` o WHERE o.name IN %(b)s AND EXISTS (
+		       SELECT 1 FROM `tabFolio Charge` fc WHERE fc.parenttype = 'Folio'
+		         AND fc.description LIKE CONCAT('%%(', o.name, ')%%')
+		         AND """ + NOT_VOIDED + """)""",
+		{"b": tuple(to_room)})} if to_room else set()
 	out: dict[str, dict] = {}
 	for r in rows:
+		if not r.paid and r.bill not in on_folio:
+			continue
 		gross = flt(r.food) + flt(r.bev)
 		keep = 1 - (flt(r.discount_amount) / gross) if gross else 0
 		o = out.setdefault(r.outlet, {"outlet": r.outlet, "bills": 0, "food": 0.0,
@@ -119,7 +163,10 @@ def _period(property: str, label: str, start, end, total_rooms: int) -> dict:
 	bev = sum(o["beverage"] for o in outlets) + f["beverage"]
 	nights = int(f["room_nights"])
 	available = total_rooms * (date_diff(end, start) + 1)
-	total = f["rooms"] + food + bev + banq["total"] + f["meal_plan_minibar"] + f["other"]
+	# discounts and allowances given after a charge (negative) get their own
+	# column: inside "other" they made it negative and hid the other income
+	total = (f["rooms"] + food + bev + banq["total"] + f["meal_plan_minibar"]
+	         + f["other"] + f["allowances"])
 	return {
 		"label": label, "from_date": str(start), "to_date": str(end),
 		"rooms_sold": nights,
@@ -129,7 +176,8 @@ def _period(property: str, label: str, start, end, total_rooms: int) -> dict:
 		"revpar": round(f["rooms"] / available, 0) if available else 0,
 		"food": round(food, 2), "beverage": round(bev, 2),
 		"banquets": banq["total"], "meal_plan_minibar": f["meal_plan_minibar"],
-		"other": f["other"], "total_revenue": round(total, 2),
+		"other": f["other"], "allowances": f["allowances"],
+		"total_revenue": round(total, 2),
 		"outlets": outlets, "banquet": banq,
 	}
 

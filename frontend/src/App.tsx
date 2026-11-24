@@ -10,6 +10,7 @@ import {
 } from "react-router-dom"
 import AppShell, { type ShellContext } from "./AppShell"
 const Login = lazy(() => import("./screens/Login"))
+const UpdatePassword = lazy(() => import("./screens/UpdatePassword"))
 import { useAuth } from "./lib/auth"
 import { visibleApps } from "./lib/apps"
 import { t, useT, t as translate, useUILanguage } from "./lib/i18n"
@@ -73,6 +74,8 @@ const AllowanceApprovals = lazy(() => import("./screens/AllowanceApprovals"))
 const TapeChart = lazy(() => import("./screens/TapeChart"))
 const Tickets = lazy(() => import("./screens/Tickets"))
 const Laundry = lazy(() => import("./screens/Laundry"))
+const Recreation = lazy(() => import("./screens/Recreation"))
+const UnitOwners = lazy(() => import("./screens/UnitOwners"))
 const MenuItems = lazy(() => import("./screens/MenuItems"))
 const RoomsSetup = lazy(() => import("./screens/RoomsSetup"))
 const Groups = lazy(() => import("./screens/Groups"))
@@ -201,6 +204,9 @@ export default function App() {
         <Route path="hk" element={<HkApp />} />
         {/* dedicated login route so signing out changes the URL */}
         <Route path="login" element={<LoginPage />} />
+        {/* password reset email lands on /update-password?key=… (redirected
+            into /kamra); signed-in change-password uses the same screen */}
+        <Route path="update-password" element={<UpdatePassword />} />
         <Route element={<RequireAuth />}>
           <Route element={<AppShell />}>
           <Route index element={<Home />} />
@@ -247,9 +253,14 @@ export default function App() {
             element={<ConfiguredScreen config="seasonsConfig" />}
           />
           <Route
-            path="packages"
-            element={<ConfiguredScreen config="holidayPackagesConfig" />}
-          />
+            <Route
+              path="rate-restrictions"
+              element={<ConfiguredScreen config="rateRestrictionsConfig" />}
+            />
+            <Route
+              path="packages"
+              element={<ConfiguredScreen config="holidayPackagesConfig" />}
+            />
           <Route
             path="long-stay"
             element={<ConfiguredScreen config="longStayConfig" />}
@@ -384,6 +395,8 @@ export default function App() {
           />
           <Route path="tickets" element={<Tickets />} />
           <Route path="laundry" element={<Laundry />} />
+          <Route path="recreation" element={<Recreation />} />
+          <Route path="unit-owners" element={<UnitOwners />} />
           <Route path="housekeeping-board" element={<HousekeepingBoard />} />
           <Route path="room-board" element={<Rooms />} />
           <Route

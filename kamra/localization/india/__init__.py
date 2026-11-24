@@ -35,8 +35,17 @@ ID_TYPES = ["Aadhaar", "Passport", "Driving License", "Voter ID", "PAN", "Other"
 ID_TYPE_HINTS = {"Aadhaar": "A masked Aadhaar (last 4 digits showing) is fine."}
 INVOICE_TAX_NOTE = "Amounts are inclusive of GST at the rates shown."
 PAYMENT_MODES = ["Cash", "Card", "UPI", "Bank Transfer"]
+# notes and coins the till counts at close, largest first
+CASH_DENOMINATIONS = (500, 200, 100, 50, 20, 10, 5, 2, 1)
 # settled like a card but counted in its own till bucket
 INSTANT_PAYMENT_MODES = ["UPI"]
+# TDS a company deducts from a hotel bill (Income-tax Act): 194C for a
+# contract for services (1% individual/HUF, 2% others), 194-I for
+# accommodation taken on a regular basis (10%). Certified on Form 16A.
+WITHHOLDING_TAXES = [
+	{"code": "TDS-194C", "label": "TDS u/s 194C", "rates": [1, 2]},
+	{"code": "TDS-194I", "label": "TDS u/s 194-I", "rates": [10]},
+]
 # Indian hotels keep a signed registration card (the hotel register the
 # police may inspect), so the guided check-in makes the GRC a required step
 # by default. A property can still change it in its check-in steps.
