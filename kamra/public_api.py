@@ -98,6 +98,7 @@ def _property_payload(prop) -> dict:
 		"og_image": prop.get("og_image"),
 		"page_slug": prop.get("page_slug"),
 		"booking_engine_enabled": prop.get("booking_engine_enabled"),
+		"auto_expand_search": int(prop.get("auto_expand_search") or 0),
 		"payment_mode": prop.get("booking_payment_mode") or "Pay at hotel",
 		"advance_percent": float(prop.get("advance_percent") or 0),
 		"registration_fee": float(prop.get("registration_fee") or 0),

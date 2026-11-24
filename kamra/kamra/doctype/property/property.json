@@ -59,6 +59,7 @@
   "sb_modules",
   "enabled_modules",
   "booking_engine_enabled",
+  "auto_expand_search",
   "booking_payment_mode",
   "advance_percent",
   "registration_fee",
@@ -423,6 +424,13 @@
    "fieldname": "booking_engine_enabled",
    "fieldtype": "Check",
    "label": "Booking Engine Enabled"
+  },
+  {
+   "default": "0",
+   "fieldname": "auto_expand_search",
+   "fieldtype": "Check",
+   "label": "Expand Booking Search Bar by Default",
+   "description": "When enabled, the date and guest search panel opens automatically when guests visit the public booking engine."
   },
   {
    "fieldname": "booking_payment_mode",

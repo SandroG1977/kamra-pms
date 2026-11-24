@@ -57,6 +57,7 @@ interface Showcase {
     logo_url: string | null
     hero_image: string | null
     brand_accent: string | null
+    auto_expand_search?: number | boolean
     payment_mode: string
     advance_percent: number
     registration_fee: number
@@ -524,7 +525,10 @@ export default function PublicBooking() {
   const [childAgesState, setChildAges] = useState<ChildAge[]>([])
   const childAges = sizeAges(childAgesState, search.children)
   const agesMissing = search.children > 0 && !agesToSend(childAges)
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useState(() => {
+    const qs = new URLSearchParams(window.location.search)
+    return qs.get("search") === "1" || qs.get("expand") === "1"
+  })
   const [mealFilter, setMealFilter] = useState<string | null>(null)
   const [availableOnly, setAvailableOnly] = useState(false)
   const [selected, setSelected] = useState<{ room_type: string; meal_plan: string } | null>(null)
@@ -601,6 +605,9 @@ export default function PublicBooking() {
         adoptUiLocale((d as unknown as { ui_locale?: { currency_symbol?: string; locale?: string } }).ui_locale)
         setPrivacyTerms((d as unknown as { ui_locale?: { privacy_authority?: string } }).ui_locale)
         setData(d)
+        if (d.property?.auto_expand_search) {
+          setEditing(true)
+        }
       })
       .catch(() => setLoadFailed(true))
   }, [propertySlug])
