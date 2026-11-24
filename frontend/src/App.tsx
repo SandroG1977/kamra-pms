@@ -253,14 +253,13 @@ export default function App() {
             element={<ConfiguredScreen config="seasonsConfig" />}
           />
           <Route
-            <Route
-              path="rate-restrictions"
-              element={<ConfiguredScreen config="rateRestrictionsConfig" />}
-            />
-            <Route
-              path="packages"
-              element={<ConfiguredScreen config="holidayPackagesConfig" />}
-            />
+            path="rate-restrictions"
+            element={<ConfiguredScreen config="rateRestrictionsConfig" />}
+          />
+          <Route
+            path="packages"
+            element={<ConfiguredScreen config="holidayPackagesConfig" />}
+          />
           <Route
             path="long-stay"
             element={<ConfiguredScreen config="longStayConfig" />}
