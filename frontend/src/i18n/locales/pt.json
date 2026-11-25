@@ -6624,5 +6624,11 @@
   "Room {n} selected": "Quarto {n} selecionado",
   "Select all {n} rooms": "Selecione todos os {n} quartos",
   "Not selected": "Não selecionado",
-  "Select this room": "Selecionar este quarto"
+  "Select this room": "Selecionar este quarto",
+  "Add room": "Adicionar quarto",
+  "Remove this room": "Remover este quarto",
+  "Guests for Room {n}": "Hóspedes para o Quarto {n}",
+  "Adjust adults and children per room": "Ajuste adultos e crianças por quarto",
+  "{n} room": "{n} quarto",
+  "{n} rooms": "{n} quartos"
 }

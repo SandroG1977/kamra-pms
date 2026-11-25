@@ -561,7 +561,64 @@ export default function PublicBooking() {
   const [childrenStr, setChildrenStr] = useState<string | null>(null)
   const [roomsStr, setRoomsStr] = useState<string | null>(null)
 
-  const roomParties = distributeGuests(search.adults, search.children, search.rooms || 1)
+  const curRooms = search.rooms || 1
+  const [customParties, setCustomParties] = useState<RoomParty[] | null>(null)
+
+  const roomParties: RoomParty[] = (customParties && customParties.length === curRooms)
+    ? customParties
+    : distributeGuests(search.adults, search.children, curRooms)
+
+  function updateRoomParty(roomIdx: number, newAdults: number, newChildren: number) {
+    const nextAdults = Math.max(1, Math.min(10, newAdults))
+    const nextChildren = Math.max(0, Math.min(10, newChildren))
+    const updated = roomParties.map((p, i) =>
+      i === roomIdx ? { adults: nextAdults, children: nextChildren } : { ...p }
+    )
+    setCustomParties(updated)
+    const totalA = updated.reduce((sum, p) => sum + p.adults, 0)
+    const totalC = updated.reduce((sum, p) => sum + p.children, 0)
+    setSearch((s) => ({ ...s, adults: totalA, children: totalC }))
+    setSelectedRooms((prev) => {
+      const next = { ...prev }
+      delete next[roomIdx]
+      return next
+    })
+  }
+
+  function addRoom() {
+    if (curRooms >= 10) return
+    const nextRooms = curRooms + 1
+    const newParty: RoomParty = { adults: 2, children: 0 }
+    const updated = [...roomParties, newParty]
+    setCustomParties(updated)
+    const totalA = updated.reduce((sum, p) => sum + p.adults, 0)
+    const totalC = updated.reduce((sum, p) => sum + p.children, 0)
+    setSearch((s) => ({ ...s, rooms: nextRooms, adults: totalA, children: totalC }))
+    setActiveRoomIndex(nextRooms - 1)
+  }
+
+  function removeRoom(roomIdx: number) {
+    if (curRooms <= 1) return
+    const updated = roomParties.filter((_, i) => i !== roomIdx)
+    setCustomParties(updated)
+    const totalA = updated.reduce((sum, p) => sum + p.adults, 0)
+    const totalC = updated.reduce((sum, p) => sum + p.children, 0)
+    setSelectedRooms((prev) => {
+      const next: Record<number, { room_type: string; room_type_name: string; meal_plan: string; amount: number; advance_due: number }> = {}
+      let newI = 0
+      for (let i = 0; i < curRooms; i++) {
+        if (i === roomIdx) continue
+        if (prev[i]) next[newI] = prev[i]
+        newI++
+      }
+      return next
+    })
+    setSearch((s) => ({ ...s, rooms: curRooms - 1, adults: totalA, children: totalC }))
+    if (activeRoomIndex >= curRooms - 1) {
+      setActiveRoomIndex(Math.max(0, curRooms - 2))
+    }
+  }
+
   const [results, setResults] = useState<Record<string, StayResult>>({})
   const [loadingRates, setLoadingRates] = useState(false)
   const [ratesFailed, setRatesFailed] = useState(false)
@@ -754,14 +811,14 @@ export default function PublicBooking() {
     setLoadingRates(true)
     const t = setTimeout(fetchResults, 300)
     return () => clearTimeout(t)
-  }, [property, search, checkOut, catalogMode, childAgesState, appliedVoucher])
+  }, [property, search, checkOut, catalogMode, childAgesState, appliedVoucher, customParties])
 
   function fetchResults() {
     if (!property) return
     setLoadingRates(true)
     setRatesFailed(false)
     const curRooms = search.rooms || 1
-    const partyList = distributeGuests(search.adults, search.children, curRooms)
+    const partyList = roomParties
 
     if (curRooms > 1) {
       callGuest<{
@@ -1180,7 +1237,9 @@ export default function PublicBooking() {
               <ArrowRight className="mx-1 inline size-3.5 text-zinc-400 rtl:rotate-180" aria-label={t("to")} />
               {fmtDay(checkOut)}
             </span>
-            <span className="hidden shrink-0 text-zinc-500 sm:inline">{guestsLabel}</span>
+            <span className="hidden shrink-0 text-zinc-500 sm:inline">
+              {guestsLabel}{(search.rooms || 1) > 1 ? ` · ${tn(search.rooms || 1, "{n} room", "{n} rooms")}` : ""}
+            </span>
             <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white">
               <Search className="size-3.5" aria-hidden />
             </span>
@@ -1383,13 +1442,64 @@ export default function PublicBooking() {
                 </p>
               )}
               {(search.rooms || 1) > 1 && (
-                <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl bg-zinc-50 p-2 text-xs text-zinc-600 border border-zinc-200">
-                  <span className="font-semibold text-zinc-800">{t("Room allocation")}:</span>
-                  {roomParties.map((p, idx) => (
-                    <span key={idx} className="rounded-lg bg-white px-2 py-0.5 font-medium shadow-sm border border-zinc-200">
-                      {t("Room {n}", { n: idx + 1 })}: {tn(p.adults, "{n} adult", "{n} adults")}{p.children > 0 ? `, ${tn(p.children, "{n} child", "{n} children")}` : ""}
-                    </span>
-                  ))}
+                <div className="mt-3 rounded-xl bg-zinc-50 p-3 text-xs border border-zinc-200">
+                  <div className="flex flex-wrap items-center justify-between gap-1 mb-2.5">
+                    <span className="font-semibold text-zinc-800 text-sm">{t("Room allocation")}:</span>
+                    <span className="text-zinc-500 text-xs">{t("Adjust adults and children per room")}</span>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {roomParties.map((p, idx) => (
+                      <div key={idx} className="flex items-center justify-between rounded-lg bg-white p-2.5 border border-zinc-200 shadow-sm">
+                        <span className="font-medium text-zinc-800">{t("Room {n}", { n: idx + 1 })}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1">
+                            <span className="text-zinc-500 text-[11px] font-medium">{t("Adults")}:</span>
+                            <div className="flex h-7 items-stretch rounded border border-zinc-200">
+                              <button
+                                type="button"
+                                disabled={p.adults <= 1}
+                                onClick={() => updateRoomParty(idx, p.adults - 1, p.children)}
+                                className="flex w-6 items-center justify-center text-zinc-500 hover:bg-zinc-100 disabled:opacity-30"
+                              >
+                                -
+                              </button>
+                              <span className="flex w-5 items-center justify-center font-semibold text-zinc-800">{p.adults}</span>
+                              <button
+                                type="button"
+                                disabled={p.adults >= 10}
+                                onClick={() => updateRoomParty(idx, p.adults + 1, p.children)}
+                                className="flex w-6 items-center justify-center text-zinc-500 hover:bg-zinc-100 disabled:opacity-30"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-zinc-500 text-[11px] font-medium">{t("Children")}:</span>
+                            <div className="flex h-7 items-stretch rounded border border-zinc-200">
+                              <button
+                                type="button"
+                                disabled={p.children <= 0}
+                                onClick={() => updateRoomParty(idx, p.adults, p.children - 1)}
+                                className="flex w-6 items-center justify-center text-zinc-500 hover:bg-zinc-100 disabled:opacity-30"
+                              >
+                                -
+                              </button>
+                              <span className="flex w-5 items-center justify-center font-semibold text-zinc-800">{p.children}</span>
+                              <button
+                                type="button"
+                                disabled={p.children >= 10}
+                                onClick={() => updateRoomParty(idx, p.adults, p.children + 1)}
+                                className="flex w-6 items-center justify-center text-zinc-500 hover:bg-zinc-100 disabled:opacity-30"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               <div className="mt-3">
@@ -1645,7 +1755,7 @@ export default function PublicBooking() {
                         {selectedRoomsList.length} / {totalRooms} {t("Selected")}
                       </Badge>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {roomParties.map((party, idx) => {
                         const isSelected = !!selectedRooms[idx]
                         const isActive = activeRoomIndex === idx
@@ -1672,7 +1782,86 @@ export default function PublicBooking() {
                           </button>
                         )
                       })}
+                      {curRooms < 10 && (
+                        <button
+                          type="button"
+                          onClick={addRoom}
+                          className="flex items-center gap-1.5 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 px-3 py-2 text-sm font-medium text-zinc-600 hover:border-zinc-400 hover:bg-zinc-100 transition"
+                        >
+                          <Plus className="size-3.5" />
+                          <span>{t("Add room")}</span>
+                        </button>
+                      )}
                     </div>
+
+                    {/* Active room guest selector */}
+                    {roomParties[activeRoomIndex] && (
+                      <div className="mt-3.5 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-zinc-50 border border-zinc-200 p-3">
+                        <div className="flex flex-wrap items-center gap-4">
+                          <span className="text-xs font-semibold uppercase tracking-wider text-zinc-600">
+                            {t("Guests for Room {n}", { n: activeRoomIndex + 1 })}:
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-zinc-600 font-medium">{t("Adults")}:</span>
+                            <div className="flex h-8 items-stretch rounded-lg border border-zinc-200 bg-white">
+                              <button
+                                type="button"
+                                disabled={roomParties[activeRoomIndex].adults <= 1}
+                                onClick={() => updateRoomParty(activeRoomIndex, roomParties[activeRoomIndex].adults - 1, roomParties[activeRoomIndex].children)}
+                                className="flex w-7 items-center justify-center text-zinc-500 hover:bg-zinc-100 disabled:opacity-30 transition-colors"
+                              >
+                                <Minus className="size-3.5" />
+                              </button>
+                              <span className="flex w-7 items-center justify-center text-xs font-semibold text-zinc-800">
+                                {roomParties[activeRoomIndex].adults}
+                              </span>
+                              <button
+                                type="button"
+                                disabled={roomParties[activeRoomIndex].adults >= 10}
+                                onClick={() => updateRoomParty(activeRoomIndex, roomParties[activeRoomIndex].adults + 1, roomParties[activeRoomIndex].children)}
+                                className="flex w-7 items-center justify-center text-zinc-500 hover:bg-zinc-100 disabled:opacity-30 transition-colors"
+                              >
+                                <Plus className="size-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-zinc-600 font-medium">{t("Children")}:</span>
+                            <div className="flex h-8 items-stretch rounded-lg border border-zinc-200 bg-white">
+                              <button
+                                type="button"
+                                disabled={roomParties[activeRoomIndex].children <= 0}
+                                onClick={() => updateRoomParty(activeRoomIndex, roomParties[activeRoomIndex].adults, roomParties[activeRoomIndex].children - 1)}
+                                className="flex w-7 items-center justify-center text-zinc-500 hover:bg-zinc-100 disabled:opacity-30 transition-colors"
+                              >
+                                <Minus className="size-3.5" />
+                              </button>
+                              <span className="flex w-7 items-center justify-center text-xs font-semibold text-zinc-800">
+                                {roomParties[activeRoomIndex].children}
+                              </span>
+                              <button
+                                type="button"
+                                disabled={roomParties[activeRoomIndex].children >= 10}
+                                onClick={() => updateRoomParty(activeRoomIndex, roomParties[activeRoomIndex].adults, roomParties[activeRoomIndex].children + 1)}
+                                className="flex w-7 items-center justify-center text-zinc-500 hover:bg-zinc-100 disabled:opacity-30 transition-colors"
+                              >
+                                <Plus className="size-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        {curRooms > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeRoom(activeRoomIndex)}
+                            className="inline-flex items-center gap-1 text-xs text-rose-600 hover:text-rose-700 hover:underline font-medium"
+                          >
+                            <X className="size-3.5" />
+                            {t("Remove this room")}
+                          </button>
+                        )}
+                      </div>
+                    )}
                     {selectedRooms[activeRoomIndex] && (
                       <p className="mt-2.5 text-xs text-zinc-500">
                         {t("Room {n} selected", { n: activeRoomIndex + 1 })}:{" "}
