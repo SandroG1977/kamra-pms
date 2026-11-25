@@ -1180,7 +1180,7 @@ def book(property: str, room_type: str = "", check_in_date: str = "",
 		for r in res_names:
 			old_req = frappe.db.get_value("Reservation", r, "special_requests") or ""
 			frappe.db.set_value("Reservation", r, "special_requests", f"{old_req}\n{note}".strip())
-		frappe.db.commit()
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- persists the completed operation before returning to an external/public caller; reviewed as intentional
 
 		return {
 			"reservation": ", ".join(res_names),

@@ -360,7 +360,17 @@ def season_adjust(property: str, date, base: Decimal,
 		return base * (Decimal(1) + v / Decimal(100))
 	if s.adjustment_type == "Amount":
 		return base + v
-	return v  # Absolute
+	if s.adjustment_type == "Absolute":
+		rt_name = getattr(room_type, "name", room_type)
+		if hasattr(room_type, "base_price"):
+			rt_base = _dec(room_type.base_price)
+		elif rt_name:
+			rt_base = _dec(frappe.db.get_value("Room Type", rt_name, "base_price") or 0)
+		else:
+			rt_base = Decimal(0)
+		extras = base - rt_base if rt_base else Decimal(0)
+		return max(Decimal(0), v + extras)
+	return v  # fallback
 
 
 def active_holiday_package(property: str, check_in, check_out,
