@@ -515,11 +515,19 @@ export default function PublicBooking() {
   // A property slug where the check-in date goes (/book/kamra-demo-palace,
   // a hand-typed or older link) means that property, not a date.
   const slugInPath = params.checkin && !parseDate(params.checkin) ? params.checkin : null
-  const propertySlug = new URLSearchParams(location.search).get("property") || slugInPath
+  const searchParams = new URLSearchParams(location.search)
+  const propertySlug = searchParams.get("property") || slugInPath
 
-  const [search, setSearch] = useState(() =>
-    stayFromParams(slugInPath ? {} : params),
-  )
+  const [search, setSearch] = useState(() => {
+    const raw = slugInPath ? {} : params
+    return stayFromParams({
+      checkin: raw.checkin || searchParams.get("check_in_date") || searchParams.get("checkin") || undefined,
+      checkout: raw.checkout || searchParams.get("check_out_date") || searchParams.get("checkout") || undefined,
+      adults: raw.adults || searchParams.get("adults") || undefined,
+      children: raw.children || searchParams.get("children") || undefined,
+      rooms: raw.rooms || searchParams.get("rooms") || undefined,
+    })
+  })
 
   const singleMaxCapacity = singleRoomMaxCapacity(data?.room_types)
   const minRoomsNeeded = singleMaxCapacity > 0
