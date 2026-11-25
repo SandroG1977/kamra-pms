@@ -117,3 +117,45 @@ class PublicBookingTestCase(IntegrationTestCase):
 		self.assertIsNone(brand(""))
 		self.assertEqual(brand("Example Hotels"), "Example Hotels")
 		self.assertEqual(site_info()["app"], "kamra")
+
+	def test_search_stay_with_multiple_rooms(self):
+		res = search_stay(self.property, self.ci, self.co, rooms=[
+			{"adults": 2, "children": 0},
+			{"adults": 1, "children": 0},
+		])
+		self.assertTrue(res.get("multi_room"))
+		self.assertEqual(len(res["rooms"]), 2)
+		self.assertIn(self.room_type, res["inventory"])
+
+	def test_multi_room_booking_creates_linked_reservations(self):
+		from kamra.public_api import book
+
+		# Add a second room so inventory permits 2 rooms
+		frappe.get_doc({
+			"doctype": "Room", "property": self.property,
+			"room_type": self.room_type, "room_number": "102",
+		}).insert(ignore_permissions=True)
+
+		res = book(
+			property=self.property,
+			check_in_date=self.ci,
+			check_out_date=self.co,
+			guest_name="Família Silva",
+			phone="+5511988887777",
+			email="silva@example.com",
+			rooms=[
+				{"room_type": self.room_type, "adults": 2, "children": 0},
+				{"room_type": self.room_type, "adults": 1, "children": 0},
+			],
+		)
+		self.assertIn("reservations", res)
+		self.assertEqual(len(res["reservations"]), 2)
+		r1, r2 = res["reservations"]
+		doc1 = frappe.get_doc("Reservation", r1)
+		doc2 = frappe.get_doc("Reservation", r2)
+		self.assertEqual(doc1.guest_name, "Família Silva")
+		self.assertEqual(doc2.guest_name, "Família Silva")
+		self.assertIn(r2, doc1.special_requests)
+		self.assertIn(r1, doc2.special_requests)
+		self.assertGreater(res["amount_after_tax"], 0)
+

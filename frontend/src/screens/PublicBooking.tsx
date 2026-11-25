@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { clampGuests, maxCapacity } from "../lib/occupancy"
+import { singleRoomMaxCapacity } from "../lib/occupancy"
 import PrivacyNotice, { setPrivacyTerms } from "../components/PrivacyNotice"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 import {
@@ -32,7 +32,7 @@ import { accentVars } from "../lib/accents"
 import { Badge } from "../components/ui/badge"
 import { Button } from "../components/ui/button"
 import { Sheet } from "../components/ui/sheet"
-import { cur, locale, moneyLocale, adoptUiLocale } from "../lib/money"
+import { cur, locale, adoptUiLocale, fmtAmount } from "../lib/money"
 import { formatPhoneDisplay, formatPhoneTel } from "../lib/phone"
 import { petChargeBasis } from "../lib/pets"
 import { useT, t as translate } from "../lib/i18n"
@@ -46,7 +46,7 @@ import ChildAges, {
 
 
 const inr = (n: number) =>
-  n.toLocaleString(moneyLocale(), { maximumFractionDigits: 0 })
+  fmtAmount(n)
 const money = (n: number) => `${cur()}${inr(n)}`
 
 interface Photo { url: string; caption: string | null }
@@ -462,13 +462,33 @@ function PhotoStrip({ photos, name, onOpen }: {
   )
 }
 
+export interface RoomParty {
+  adults: number
+  children: number
+}
+
+function distributeGuests(adults: number, children: number, rooms: number): RoomParty[] {
+  const r = Math.max(1, rooms)
+  const baseA = Math.floor(adults / r)
+  let remA = adults % r
+  const baseC = Math.floor(children / r)
+  let remC = children % r
+  const list: RoomParty[] = []
+  for (let i = 0; i < r; i++) {
+    const a = baseA + (remA > 0 ? 1 : 0)
+    if (remA > 0) remA--
+    const c = baseC + (remC > 0 ? 1 : 0)
+    if (remC > 0) remC--
+    list.push({ adults: Math.max(1, a), children: c })
+  }
+  return list
+}
+
 export default function PublicBooking() {
   const { t, tn, lang } = useT()
   useEffect(() => adoptGuestLanguage(), [])
   const params = useParams()
   const navigate = useNavigate()
-  const navigateRef = useRef(navigate)
-  navigateRef.current = navigate
   const location = useLocation()
   const [property, setProperty] = useState<string | null>(null)
   const [catalogMode, setCatalogMode] = useState<string | null>(null)
@@ -497,43 +517,48 @@ export default function PublicBooking() {
   const slugInPath = params.checkin && !parseDate(params.checkin) ? params.checkin : null
   const propertySlug = new URLSearchParams(location.search).get("property") || slugInPath
 
-  // What this property can actually sleep. A property page lists several room
-  // types and the guest has not picked one yet, so the roomiest bounds the
-  // search. Without it the page quotes a party the booking then refuses -
-  // the guest gets a price, fills in their details, and only finds out on
-  // submit (Reservation.validate_occupancy is the real guard).
-  const maxAdults = maxCapacity(data?.room_types, "adults_capacity")
-  const maxChildren = maxCapacity(data?.room_types, "children_capacity")
-
-  // The party also arrives in the URL (/book/in/out/adults/children), so clamp
-  // once the capacity is known - otherwise a shared or edited link walks
-  // straight past the inputs.
-  useEffect(() => {
-    if (!maxAdults && !maxChildren) return
-    setSearch((q) => {
-      const adults = clampGuests(q.adults, 1, maxAdults)
-      const children = clampGuests(q.children, 0, maxChildren)
-      return adults === q.adults && children === q.children
-        ? q
-        : { ...q, adults, children }
-    })
-  }, [maxAdults, maxChildren])
   const [search, setSearch] = useState(() =>
     stayFromParams(slugInPath ? {} : params),
   )
+
+  const singleMaxCapacity = singleRoomMaxCapacity(data?.room_types)
+  const minRoomsNeeded = singleMaxCapacity > 0
+    ? Math.max(1, Math.ceil((search.adults + search.children) / singleMaxCapacity))
+    : 1
+
+  // Automatically ensure search.rooms meets the minimum needed for the guest count
+  useEffect(() => {
+    if (minRoomsNeeded > (search.rooms || 1)) {
+      setSearch((q) => ({ ...q, rooms: minRoomsNeeded }))
+    }
+  }, [minRoomsNeeded, search.rooms])
+
+  const [activeRoomIndex, setActiveRoomIndex] = useState(0)
+  const [selectedRooms, setSelectedRooms] = useState<Record<number, {
+    room_type: string
+    room_type_name: string
+    meal_plan: string
+    amount: number
+    advance_due: number
+  }>>({})
+  const [multiRoomResults, setMultiRoomResults] = useState<{
+    multi_room: boolean
+    rooms: StayResult[][]
+    inventory: Record<string, number>
+  } | null>(null)
+
+  const [adultsStr, setAdultsStr] = useState<string | null>(null)
+  const [childrenStr, setChildrenStr] = useState<string | null>(null)
+  const [roomsStr, setRoomsStr] = useState<string | null>(null)
+
+  const roomParties = distributeGuests(search.adults, search.children, search.rooms || 1)
   const [results, setResults] = useState<Record<string, StayResult>>({})
   const [loadingRates, setLoadingRates] = useState(false)
   const [ratesFailed, setRatesFailed] = useState(false)
   const [childAgesState, setChildAges] = useState<ChildAge[]>([])
   const childAges = sizeAges(childAgesState, search.children)
   const agesMissing = search.children > 0 && !agesToSend(childAges)
-  const [adultsStr, setAdultsStr] = useState<string | null>(null)
-  const [childrenStr, setChildrenStr] = useState<string | null>(null)
-  const [petsStr, setPetsStr] = useState<string | null>(null)
-  const [editing, setEditing] = useState(() => {
-    const qs = new URLSearchParams(window.location.search)
-    return qs.get("search") === "1" || qs.get("expand") === "1"
-  })
+  const [editing, setEditing] = useState(false)
   const [mealFilter, setMealFilter] = useState<string | null>(null)
   const [availableOnly, setAvailableOnly] = useState(false)
   const [selected, setSelected] = useState<{ room_type: string; meal_plan: string } | null>(null)
@@ -583,7 +608,7 @@ export default function PublicBooking() {
       .then((idx) => {
         setCatalogMode(idx.mode)
         if (idx.mode === "single_listing" && idx.listing_slug) {
-          navigateRef.current(`/stay/${idx.listing_slug}`, { replace: true })
+          navigate(`/stay/${idx.listing_slug}`, { replace: true })
           return null
         }
         if (idx.mode === "properties") {
@@ -615,17 +640,18 @@ export default function PublicBooking() {
         }
       })
       .catch(() => setLoadFailed(true))
-  }, [propertySlug])
+  }, [navigate, propertySlug])
 
   // stay state lives in the URL - shareable, crawlable, UTM params kept
   useEffect(() => {
     const qs = new URLSearchParams(location.search)
     if (propertySlug) qs.set("property", propertySlug)
     const query = qs.toString()
-    const target = `/book/${search.check_in_date}/${checkOut}/${search.adults}/${search.children}${query ? `?${query}` : ""}`
-    if (location.pathname + (location.search || "") !== target) {
-      navigate(target, { replace: true })
-    }
+    const roomsPart = (search.rooms || 1) > 1 ? `/${search.rooms}` : ""
+    navigate(
+      `/book/${search.check_in_date}/${checkOut}/${search.adults}/${search.children}${roomsPart}${query ? `?${query}` : ""}`,
+      { replace: true },
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, checkOut])
 
@@ -717,6 +743,37 @@ export default function PublicBooking() {
     if (!property) return
     setLoadingRates(true)
     setRatesFailed(false)
+    const curRooms = search.rooms || 1
+    const partyList = distributeGuests(search.adults, search.children, curRooms)
+
+    if (curRooms > 1) {
+      callGuest<{
+        multi_room: boolean
+        rooms: StayResult[][]
+        inventory: Record<string, number>
+      }>("kamra.public_api.search_stay", {
+        property,
+        check_in_date: search.check_in_date,
+        check_out_date: checkOut,
+        rooms: partyList,
+        pets: search.pets,
+        voucher_code: appliedVoucher || undefined,
+      }).then((resp) => {
+        if (resp && resp.multi_room && Array.isArray(resp.rooms)) {
+          setMultiRoomResults(resp)
+          const activeRows = resp.rooms[activeRoomIndex] || resp.rooms[0] || []
+          const map: Record<string, StayResult> = {}
+          activeRows.forEach((r) => (map[r.room_type] = r))
+          setResults(map)
+        }
+      }).catch(() => {
+        setResults({})
+        setMultiRoomResults(null)
+        setRatesFailed(true)
+      }).finally(() => setLoadingRates(false))
+      return
+    }
+
     callGuest<StayResult[]>("kamra.public_api.search_stay", {
       property,
       check_in_date: search.check_in_date,
@@ -727,6 +784,7 @@ export default function PublicBooking() {
       pets: search.pets,
       voucher_code: appliedVoucher || undefined,
     }).then((rows) => {
+      setMultiRoomResults(null)
       const map: Record<string, StayResult> = {}
       rows.forEach((r) => (map[r.room_type] = r))
       setResults(map)
@@ -750,9 +808,33 @@ export default function PublicBooking() {
       })
     }).catch(() => {
       setResults({})
+      setMultiRoomResults(null)
       setRatesFailed(true)
     }).finally(() => setLoadingRates(false))
   }
+
+  useEffect(() => {
+    if (multiRoomResults && multiRoomResults.rooms && multiRoomResults.rooms[activeRoomIndex]) {
+      const activeRows = multiRoomResults.rooms[activeRoomIndex] || []
+      const map: Record<string, StayResult> = {}
+      activeRows.forEach((r) => (map[r.room_type] = r))
+      setResults(map)
+    }
+  }, [activeRoomIndex, multiRoomResults])
+
+  useEffect(() => {
+    const curRooms = search.rooms || 1
+    if (activeRoomIndex >= curRooms) {
+      setActiveRoomIndex(0)
+    }
+    setSelectedRooms((prev) => {
+      const next: typeof prev = {}
+      Object.entries(prev).forEach(([idx, val]) => {
+        if (Number(idx) < curRooms) next[Number(idx)] = val
+      })
+      return next
+    })
+  }, [search.rooms, activeRoomIndex])
 
   async function applyVoucher() {
     if (!property || !voucher.trim()) return
@@ -769,9 +851,25 @@ export default function PublicBooking() {
   }
 
   async function submitBooking() {
-    if (!booking || !property || !selected) return
+    const isMulti = (search.rooms || 1) > 1
+    if (!property) return
+    if (!isMulti && (!booking || !selected)) return
+    if (isMulti && Object.keys(selectedRooms).length < (search.rooms || 1)) return
     setBusy(true)
     setError(null)
+
+    const roomsPayload = isMulti
+      ? Object.entries(selectedRooms).map(([idx, sel]) => {
+          const party = roomParties[Number(idx)] || { adults: 2, children: 0 }
+          return {
+            room_type: sel.room_type,
+            meal_plan: sel.meal_plan,
+            adults: party.adults,
+            children: party.children,
+          }
+        })
+      : undefined
+
     try {
       const res = await callGuest<{
         reservation: string
@@ -782,7 +880,7 @@ export default function PublicBooking() {
       }>("kamra.public_api.book",
         {
           property,
-          room_type: booking,
+          room_type: isMulti ? selectedRooms[0]?.room_type : booking,
           check_in_date: search.check_in_date,
           check_out_date: checkOut,
           adults: search.adults,
@@ -790,9 +888,10 @@ export default function PublicBooking() {
           child_ages: agesToSend(childAges),
           pets: search.pets,
           ...form,
-          meal_plan: selected.meal_plan,
+          meal_plan: isMulti ? selectedRooms[0]?.meal_plan : selected?.meal_plan,
           voucher_code: appliedVoucher,
           source_tag: sourceTag || undefined,
+          rooms: roomsPayload,
           addons: Object.entries(addons)
             .filter(([, qty]) => qty > 0)
             .map(([experience, qty]) => ({ experience, qty })),
@@ -885,9 +984,7 @@ export default function PublicBooking() {
 
   const fmtDay = (iso: string) =>
     (parseDate(iso) ?? new Date()).toLocaleDateString(lang, { weekday: "short", day: "numeric", month: "short" })
-  const totalGuests = search.adults + search.children
-  const guestsLabel = tn(totalGuests, "{n} guest", "{n} guests")
-  const forGuestsLabel = totalGuests > 0 ? tn(totalGuests, "for {n} guest", "for {n} guests") : ""
+  const guestsLabel = tn(search.adults + search.children, "{n} guest", "{n} guests")
   const mealLabel = (mp: string) =>
     mp ? translate(data.meal_plans.find((m) => m.name === mp)?.label ?? mp) : t("Room only")
 
@@ -925,44 +1022,120 @@ export default function PublicBooking() {
   const selTerms = selected ? cancelTerms(results[selected.room_type]) : null
   const roomsShown = data.room_types.filter((rt) => !availableOnly || canReserve(results[rt.name]))
 
-  const summary = (compact: boolean) => sel && selPlan ? (
-    <>
-      {!compact && (
-        <div className="flex gap-3">
-          {imagesOf(sel.media)[0] && (
-            <img src={imagesOf(sel.media)[0].url} alt="" className="size-16 shrink-0 rounded-lg object-cover" />
+  const isMulti = (search.rooms || 1) > 1
+  const totalRooms = search.rooms || 1
+  const selectedRoomsList = Object.entries(selectedRooms)
+  const allRoomsSelected = isMulti && selectedRoomsList.length === totalRooms
+  const multiTotal = selectedRoomsList.reduce((acc, [, r]) => acc + (r.amount || 0), 0)
+  const multiAdvance = selectedRoomsList.reduce((acc, [, r]) => acc + (r.advance_due || 0), 0)
+  const hasSummary = isMulti ? selectedRoomsList.length > 0 : !!(sel && selPlan)
+
+  const summary = (compact: boolean) => {
+    if (isMulti) {
+      if (selectedRoomsList.length === 0) return null
+      return (
+        <>
+          {!compact && (
+            <div className="space-y-2">
+              <p className="font-semibold text-zinc-900">{t("Rooms")}</p>
+              {Array.from({ length: totalRooms }).map((_, idx) => {
+                const roomSel = selectedRooms[idx]
+                const party = roomParties[idx]
+                return (
+                  <div key={idx} className="rounded-lg border border-zinc-100 bg-zinc-50 p-2.5 text-xs">
+                    <div className="flex justify-between items-center font-medium">
+                      <span className="text-zinc-800">{t("Room {n}", { n: idx + 1 })}: {roomSel ? roomSel.room_type_name : t("Not selected")}</span>
+                      <span className="text-zinc-500">
+                        {party ? `${tn(party.adults, "{n} adult", "{n} adults")}${party.children > 0 ? `, ${tn(party.children, "{n} child", "{n} children")}` : ""}` : ""}
+                      </span>
+                    </div>
+                    {roomSel ? (
+                      <div className="flex justify-between items-center mt-1 text-zinc-600">
+                        <span>{mealLabel(roomSel.meal_plan)}</span>
+                        <span className="font-semibold text-zinc-900">{money(roomSel.amount)}</span>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setActiveRoomIndex(idx)}
+                        className="mt-1 text-brand-700 underline font-medium hover:text-brand-800"
+                      >
+                        {t("Select this room")}
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           )}
-          <div className="min-w-0">
-            <p className="font-semibold text-zinc-900">{sel.room_type_name}</p>
-            <p className="text-sm text-zinc-500">{mealLabel(selPlan.meal_plan)}{forGuestsLabel ? ` ${forGuestsLabel}` : ""}</p>
+          {!compact && (
+            <dl className="mt-4 space-y-1.5 border-t border-zinc-100 pt-4 text-sm">
+              <div className="flex justify-between gap-3"><dt className="text-zinc-500">{t("Check-in")}</dt><dd className="font-medium text-zinc-800">{fmtDay(search.check_in_date)}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-zinc-500">{t("Check-out")}</dt><dd className="font-medium text-zinc-800">{fmtDay(checkOut)}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-zinc-500">{t("Guests")}</dt><dd className="font-medium text-zinc-800">{guestsLabel}</dd></div>
+              {appliedVoucher && (
+                <div className="flex justify-between gap-3"><dt className="text-zinc-500">{t("Promo code")}</dt><dd className="font-medium text-brand-700">{appliedVoucher.toUpperCase()}</dd></div>
+              )}
+            </dl>
+          )}
+          <div className={compact ? "" : "mt-4 border-t border-zinc-100 pt-4"}>
+            <div className="flex items-baseline justify-between gap-3">
+              <span className={compact ? "truncate text-sm font-medium text-zinc-700" : "text-sm text-zinc-500"}>
+                {compact ? `${selectedRoomsList.length}/${totalRooms} ${t("rooms selected")}` : tn(nights, "Total for {n} night", "Total for {n} nights")}
+              </span>
+              <span className="text-xl font-semibold tabular-nums text-zinc-900">{money(multiTotal)}</span>
+            </div>
+            <p className="mt-0.5 text-end text-xs text-zinc-500">
+              {multiAdvance > 0
+                ? t("{amount} due now", { amount: money(multiAdvance) })
+                : t("Taxes and fees included")}
+            </p>
           </div>
+        </>
+      )
+    }
+
+    if (!sel || !selPlan) return null
+
+    return (
+      <>
+        {!compact && (
+          <div className="flex gap-3">
+            {imagesOf(sel.media)[0] && (
+              <img src={imagesOf(sel.media)[0].url} alt="" className="size-16 shrink-0 rounded-lg object-cover" />
+            )}
+            <div className="min-w-0">
+              <p className="font-semibold text-zinc-900">{sel.room_type_name}</p>
+              <p className="text-sm text-zinc-500">{mealLabel(selPlan.meal_plan)}</p>
+            </div>
+          </div>
+        )}
+        {!compact && (
+          <dl className="mt-4 space-y-1.5 border-t border-zinc-100 pt-4 text-sm">
+            <div className="flex justify-between gap-3"><dt className="text-zinc-500">{t("Check-in")}</dt><dd className="font-medium text-zinc-800">{fmtDay(search.check_in_date)}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-zinc-500">{t("Check-out")}</dt><dd className="font-medium text-zinc-800">{fmtDay(checkOut)}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-zinc-500">{t("Guests")}</dt><dd className="font-medium text-zinc-800">{guestsLabel}</dd></div>
+            {appliedVoucher && (
+              <div className="flex justify-between gap-3"><dt className="text-zinc-500">{t("Promo code")}</dt><dd className="font-medium text-brand-700">{appliedVoucher.toUpperCase()}</dd></div>
+            )}
+          </dl>
+        )}
+        <div className={compact ? "" : "mt-4 border-t border-zinc-100 pt-4"}>
+          <div className="flex items-baseline justify-between gap-3">
+            <span className={compact ? "truncate text-sm font-medium text-zinc-700" : "text-sm text-zinc-500"}>
+              {compact ? sel.room_type_name : tn(nights, "Total for {n} night", "Total for {n} nights")}
+            </span>
+            <span className="text-xl font-semibold tabular-nums text-zinc-900">{money(selPlan.amount_after_tax)}</span>
+          </div>
+          <p className="mt-0.5 text-end text-xs text-zinc-500">
+            {(selPlan.advance_due || 0) > 0
+              ? t("{amount} due now", { amount: money(selPlan.advance_due || 0) })
+              : t("Taxes and fees included")}
+          </p>
         </div>
-      )}
-      {!compact && (
-        <dl className="mt-4 space-y-1.5 border-t border-zinc-100 pt-4 text-sm">
-          <div className="flex justify-between gap-3"><dt className="text-zinc-500">{t("Check-in")}</dt><dd className="font-medium text-zinc-800">{fmtDay(search.check_in_date)}</dd></div>
-          <div className="flex justify-between gap-3"><dt className="text-zinc-500">{t("Check-out")}</dt><dd className="font-medium text-zinc-800">{fmtDay(checkOut)}</dd></div>
-          <div className="flex justify-between gap-3"><dt className="text-zinc-500">{t("Guests")}</dt><dd className="font-medium text-zinc-800">{guestsLabel}</dd></div>
-          {appliedVoucher && (
-            <div className="flex justify-between gap-3"><dt className="text-zinc-500">{t("Promo code")}</dt><dd className="font-medium text-brand-700">{appliedVoucher.toUpperCase()}</dd></div>
-          )}
-        </dl>
-      )}
-      <div className={compact ? "" : "mt-4 border-t border-zinc-100 pt-4"}>
-        <div className="flex items-baseline justify-between gap-3">
-          <span className={compact ? "truncate text-sm font-medium text-zinc-700" : "text-sm text-zinc-500"}>
-            {compact ? sel.room_type_name : tn(nights, "Total for {n} night", "Total for {n} nights")}
-          </span>
-          <span className="text-xl font-semibold tabular-nums text-zinc-900">{money(selPlan.amount_after_tax)}</span>
-        </div>
-        <p className="mt-0.5 text-end text-xs text-zinc-500">
-          {(selPlan.advance_due || 0) > 0
-            ? t("{amount} due now", { amount: money(selPlan.advance_due || 0) })
-            : t("Taxes and fees included")}
-        </p>
-      </div>
-    </>
-  ) : null
+      </>
+    )
+  }
 
   return (
     <div className="relative min-h-screen bg-zinc-50" style={accentVars(data?.property.brand_accent)}>
@@ -1045,7 +1218,7 @@ export default function PublicBooking() {
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-zinc-500">{t("Adults")}</span>
-                  <div className="flex h-11 items-center rounded-lg border border-zinc-300 bg-white focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-brand-600">
+                  <div className="flex h-10 items-stretch rounded-lg border border-zinc-200 bg-white">
                     <button
                       type="button"
                       aria-label={t("Decrease adults")}
@@ -1058,40 +1231,36 @@ export default function PublicBooking() {
                     <input
                       type="number"
                       min={1}
-                      max={maxAdults || undefined}
-                      className="h-full w-full border-0 bg-transparent text-center text-base font-medium text-zinc-900 focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      max={30}
+                      className="h-full min-w-0 flex-1 border-0 bg-transparent px-2 text-center text-sm text-zinc-900 focus:outline-none focus:ring-0 [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       value={adultsStr !== null ? adultsStr : search.adults}
-                      onFocus={(e) => e.target.select()}
                       onChange={(e) => {
                         const val = e.target.value
                         setAdultsStr(val)
                         if (val !== "") {
                           const n = parseInt(val, 10)
-                          if (!isNaN(n)) setSearch((s) => ({ ...s, adults: clampGuests(n, 1, maxAdults) }))
+                          if (!isNaN(n)) setSearch((s) => ({ ...s, adults: Math.max(1, Math.min(30, n)) }))
                         }
                       }}
                       onBlur={() => {
                         setAdultsStr(null)
-                        setSearch((s) => ({ ...s, adults: clampGuests(s.adults || 1, 1, maxAdults) }))
+                        setSearch((s) => ({ ...s, adults: Math.max(1, Math.min(30, s.adults || 1)) }))
                       }}
                     />
                     <button
                       type="button"
                       aria-label={t("Increase adults")}
-                      disabled={maxAdults > 0 && search.adults >= maxAdults}
-                      onClick={() => setSearch((s) => ({ ...s, adults: clampGuests(s.adults + 1, 1, maxAdults) }))}
+                      disabled={search.adults >= 30}
+                      onClick={() => setSearch((s) => ({ ...s, adults: Math.min(30, s.adults + 1) }))}
                       className="flex h-full w-10 shrink-0 items-center justify-center rounded-r-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
                     >
                       <Plus className="size-4" />
                     </button>
                   </div>
-                  {maxAdults > 0 && search.adults >= maxAdults && (
-                    <span className="mt-1 block text-xs text-zinc-500">{t("Sleeps up to {n}", { n: maxAdults })}</span>
-                  )}
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-zinc-500">{t("Children")}</span>
-                  <div className="flex h-11 items-center rounded-lg border border-zinc-300 bg-white focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-brand-600">
+                  <div className="flex h-10 items-stretch rounded-lg border border-zinc-200 bg-white">
                     <button
                       type="button"
                       aria-label={t("Decrease children")}
@@ -1104,78 +1273,85 @@ export default function PublicBooking() {
                     <input
                       type="number"
                       min={0}
-                      max={maxChildren || undefined}
-                      className="h-full w-full border-0 bg-transparent text-center text-base font-medium text-zinc-900 focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      max={20}
+                      className="h-full min-w-0 flex-1 border-0 bg-transparent px-2 text-center text-sm text-zinc-900 focus:outline-none focus:ring-0 [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       value={childrenStr !== null ? childrenStr : search.children}
-                      onFocus={(e) => e.target.select()}
                       onChange={(e) => {
                         const val = e.target.value
                         setChildrenStr(val)
                         if (val !== "") {
                           const n = parseInt(val, 10)
-                          if (!isNaN(n)) setSearch((s) => ({ ...s, children: clampGuests(n, 0, maxChildren) }))
+                          if (!isNaN(n)) setSearch((s) => ({ ...s, children: Math.max(0, Math.min(20, n)) }))
                         }
                       }}
                       onBlur={() => {
                         setChildrenStr(null)
-                        setSearch((s) => ({ ...s, children: clampGuests(s.children || 0, 0, maxChildren) }))
+                        setSearch((s) => ({ ...s, children: Math.max(0, Math.min(20, s.children || 0)) }))
                       }}
                     />
                     <button
                       type="button"
                       aria-label={t("Increase children")}
-                      disabled={maxChildren > 0 && search.children >= maxChildren}
-                      onClick={() => setSearch((s) => ({ ...s, children: clampGuests(s.children + 1, 0, maxChildren) }))}
+                      disabled={search.children >= 20}
+                      onClick={() => setSearch((s) => ({ ...s, children: Math.min(20, s.children + 1) }))}
                       className="flex h-full w-10 shrink-0 items-center justify-center rounded-r-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
                     >
                       <Plus className="size-4" />
                     </button>
                   </div>
-                  {maxChildren > 0 && search.children >= maxChildren && (
-                    <span className="mt-1 block text-xs text-zinc-500">{t("Up to {n} children", { n: maxChildren })}</span>
-                  )}
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-zinc-500">{t("Rooms")}</span>
+                  <div className="flex h-10 items-stretch rounded-lg border border-zinc-200 bg-white">
+                    <button
+                      type="button"
+                      aria-label={t("Decrease rooms")}
+                      disabled={(search.rooms || 1) <= minRoomsNeeded}
+                      onClick={() => setSearch((s) => ({ ...s, rooms: Math.max(minRoomsNeeded, (s.rooms || 1) - 1) }))}
+                      className="flex h-full w-10 shrink-0 items-center justify-center rounded-l-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    >
+                      <Minus className="size-4" />
+                    </button>
+                    <input
+                      type="number"
+                      min={minRoomsNeeded}
+                      max={10}
+                      className="h-full min-w-0 flex-1 border-0 bg-transparent px-2 text-center text-sm text-zinc-900 focus:outline-none focus:ring-0 [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                      value={roomsStr !== null ? roomsStr : (search.rooms || 1)}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setRoomsStr(val)
+                        if (val !== "") {
+                          const n = parseInt(val, 10)
+                          if (!isNaN(n)) setSearch((s) => ({ ...s, rooms: Math.max(minRoomsNeeded, Math.min(10, n)) }))
+                        }
+                      }}
+                      onBlur={() => {
+                        setRoomsStr(null)
+                        setSearch((s) => ({ ...s, rooms: Math.max(minRoomsNeeded, Math.min(10, s.rooms || 1)) }))
+                      }}
+                    />
+                    <button
+                      type="button"
+                      aria-label={t("Increase rooms")}
+                      disabled={(search.rooms || 1) >= 10}
+                      onClick={() => setSearch((s) => ({ ...s, rooms: Math.min(10, (s.rooms || 1) + 1) }))}
+                      className="flex h-full w-10 shrink-0 items-center justify-center rounded-r-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    >
+                      <Plus className="size-4" />
+                    </button>
+                  </div>
                 </label>
                 {!!p.pets_allowed && (
                   <label className="block">
                     <span className="mb-1 block text-xs font-medium text-zinc-500">{t("Pets")}</span>
-                    <div className="flex h-11 items-center rounded-lg border border-zinc-300 bg-white focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-brand-600">
-                      <button
-                        type="button"
-                        aria-label={t("Decrease pets")}
-                        disabled={search.pets <= 0}
-                        onClick={() => setSearch((s) => ({ ...s, pets: Math.max(0, s.pets - 1) }))}
-                        className="flex h-full w-10 shrink-0 items-center justify-center rounded-l-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
-                      >
-                        <Minus className="size-4" />
-                      </button>
-                      <input
-                        type="number"
-                        min={0}
-                        className="h-full w-full border-0 bg-transparent text-center text-base font-medium text-zinc-900 focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        value={petsStr !== null ? petsStr : search.pets}
-                        onFocus={(e) => e.target.select()}
-                        onChange={(e) => {
-                          const val = e.target.value
-                          setPetsStr(val)
-                          if (val !== "") {
-                            const n = parseInt(val, 10)
-                            if (!isNaN(n)) setSearch((s) => ({ ...s, pets: Math.max(0, n) }))
-                          }
-                        }}
-                        onBlur={() => {
-                          setPetsStr(null)
-                          setSearch((s) => ({ ...s, pets: Math.max(0, s.pets || 0) }))
-                        }}
-                      />
-                      <button
-                        type="button"
-                        aria-label={t("Increase pets")}
-                        onClick={() => setSearch((s) => ({ ...s, pets: s.pets + 1 }))}
-                        className="flex h-full w-10 shrink-0 items-center justify-center rounded-r-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
-                      >
-                        <Plus className="size-4" />
-                      </button>
-                    </div>
+                    <input
+                      type="number"
+                      min={0}
+                      className={inputCls}
+                      value={search.pets}
+                      onChange={(e) => setSearch({ ...search, pets: Math.max(0, Number(e.target.value) || 0) })}
+                    />
                     {(p.pet_charge || 0) > 0 && (
                       <span className="mt-1 block text-xs text-zinc-500">
                         {money(p.pet_charge || 0)} {petChargeBasis(p.pet_charge_basis, t)}
@@ -1184,6 +1360,21 @@ export default function PublicBooking() {
                   </label>
                 )}
               </div>
+              {minRoomsNeeded > 1 && (
+                <p className="mt-2 text-xs font-medium text-brand-700">
+                  {t("For this group, at least {n} rooms are required", { n: minRoomsNeeded })}
+                </p>
+              )}
+              {(search.rooms || 1) > 1 && (
+                <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl bg-zinc-50 p-2 text-xs text-zinc-600 border border-zinc-200">
+                  <span className="font-semibold text-zinc-800">{t("Room allocation")}:</span>
+                  {roomParties.map((p, idx) => (
+                    <span key={idx} className="rounded-lg bg-white px-2 py-0.5 font-medium shadow-sm border border-zinc-200">
+                      {t("Room {n}", { n: idx + 1 })}: {tn(p.adults, "{n} adult", "{n} adults")}{p.children > 0 ? `, ${tn(p.children, "{n} child", "{n} children")}` : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
               <div className="mt-3">
                 <ChildAges ages={childAges} onChange={setChildAges} selectCls={inputCls} />
               </div>
@@ -1422,6 +1613,60 @@ export default function PublicBooking() {
                   </p>
                 )}
 
+                {isMulti && (
+                  <div className="mt-5 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                      <div>
+                        <h4 className="font-semibold text-zinc-900">
+                          {t("Select rooms for your stay")}
+                        </h4>
+                        <p className="text-xs text-zinc-500">
+                          {t("Pick a room type and rate for each room")}
+                        </p>
+                      </div>
+                      <Badge tone={allRoomsSelected ? "green" : "zinc"}>
+                        {selectedRoomsList.length} / {totalRooms} {t("Selected")}
+                      </Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {roomParties.map((party, idx) => {
+                        const isSelected = !!selectedRooms[idx]
+                        const isActive = activeRoomIndex === idx
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setActiveRoomIndex(idx)}
+                            className={`flex items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-medium transition ${
+                              isActive
+                                ? "border-brand-600 bg-brand-50 text-brand-700 ring-2 ring-brand-600/20"
+                                : isSelected
+                                ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                                : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300"
+                            }`}
+                          >
+                            <span>{t("Room {n}", { n: idx + 1 })}</span>
+                            <span className="text-xs opacity-75">
+                              ({tn(party.adults, "{n} adult", "{n} adults")}{party.children > 0 ? `, ${tn(party.children, "{n} child", "{n} children")}` : ""})
+                            </span>
+                            {isSelected && (
+                              <Check className="size-4 text-emerald-600 shrink-0" aria-hidden />
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {selectedRooms[activeRoomIndex] && (
+                      <p className="mt-2.5 text-xs text-zinc-500">
+                        {t("Room {n} selected", { n: activeRoomIndex + 1 })}:{" "}
+                        <span className="font-medium text-zinc-800">
+                          {selectedRooms[activeRoomIndex].room_type_name} - {mealLabel(selectedRooms[activeRoomIndex].meal_plan)} ({money(selectedRooms[activeRoomIndex].amount)})
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <div className="mt-5 space-y-5">
                   {roomsShown.length === 0 && (
                     <div className="rounded-2xl border border-dashed border-zinc-300 bg-white px-6 py-10 text-center">
@@ -1462,7 +1707,7 @@ export default function PublicBooking() {
                                     ? tn(rt.children_capacity, "Sleeps {adults} adults and {n} child", "Sleeps {adults} adults and {n} children", { adults: rt.adults_capacity })
                                     : t("Up to {n} adults", { n: rt.adults_capacity })}
                               </li>
-                              {(rt.bed_configuration || rt.bed_type) && (
+                              {rt.bed_type && (
                                 <li className="flex items-center gap-2">
                                   <BedDouble className="size-4 shrink-0 text-zinc-400" aria-hidden />
                                   {rt.bed_configuration ? translate(rt.bed_configuration) : t("{type} bed", { type: translate(rt.bed_type || "") })}
@@ -1546,13 +1791,22 @@ export default function PublicBooking() {
                               )}
                               <ul className="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200">
                                 {plans.map((pl) => {
-                                  const on = selected?.room_type === rt.name && selected.meal_plan === pl.meal_plan
+                                  const party = isMulti
+                                    ? (roomParties[activeRoomIndex] || { adults: 2, children: 0 })
+                                    : { adults: search.adults, children: search.children }
+                                  const roomGuests = party.adults + party.children
+                                  const guestsText = tn(roomGuests, "for {n} guest", "for {n} guests")
+
+                                  const curRoomSel = selectedRooms[activeRoomIndex]
+                                  const on = isMulti
+                                    ? curRoomSel?.room_type === rt.name && curRoomSel?.meal_plan === pl.meal_plan
+                                    : selected?.room_type === rt.name && selected?.meal_plan === pl.meal_plan
                                   return (
                                     <li key={pl.meal_plan}
                                       className={"p-4 transition " + (on ? "bg-brand-50 shadow-[inset_3px_0_0_var(--color-brand-600)] rtl:shadow-[inset_-3px_0_0_var(--color-brand-600)]" : "")}>
                                       <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
                                         <div className="min-w-0 flex-1 basis-52 space-y-1">
-                                          <p className="font-medium text-zinc-900">{mealLabel(pl.meal_plan)}{forGuestsLabel ? ` ${forGuestsLabel}` : ""}</p>
+                                          <p className="font-medium text-zinc-900">{mealLabel(pl.meal_plan)} {guestsText}</p>
                                           {terms && (
                                             <p className={"flex items-center gap-1.5 text-sm " + (terms.free ? "text-brand-700" : "text-zinc-500")}>
                                               <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
@@ -1584,7 +1838,36 @@ export default function PublicBooking() {
                                             className="min-w-24 justify-center whitespace-nowrap px-4 py-2"
                                             disabled={!reservable}
                                             aria-pressed={on}
-                                            onClick={() => setSelected(on ? null : { room_type: rt.name, meal_plan: pl.meal_plan })}
+                                            onClick={() => {
+                                              if (isMulti) {
+                                                if (on) {
+                                                  setSelectedRooms((prev) => {
+                                                    const next = { ...prev }
+                                                    delete next[activeRoomIndex]
+                                                    return next
+                                                  })
+                                                } else {
+                                                  setSelectedRooms((prev) => ({
+                                                    ...prev,
+                                                    [activeRoomIndex]: {
+                                                      room_type: rt.name,
+                                                      room_type_name: rt.room_type_name,
+                                                      meal_plan: pl.meal_plan,
+                                                      amount: pl.amount_after_tax,
+                                                      advance_due: pl.advance_due || 0,
+                                                    },
+                                                  }))
+                                                  for (let i = 0; i < totalRooms; i++) {
+                                                    if (i !== activeRoomIndex && !selectedRooms[i]) {
+                                                      setActiveRoomIndex(i)
+                                                      break
+                                                    }
+                                                  }
+                                                }
+                                              } else {
+                                                setSelected(on ? null : { room_type: rt.name, meal_plan: pl.meal_plan })
+                                              }
+                                            }}
                                           >
                                             {on ? <><Check className="size-4" aria-hidden />{t("Selected")}</> : t("Select")}
                                           </Button>
@@ -1773,11 +2056,17 @@ export default function PublicBooking() {
             <aside className="hidden lg:block">
               <div className="sticky top-20 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
                 <h2 className="text-base font-semibold text-zinc-900">{t("Your stay")}</h2>
-                {sel && selPlan ? (
+                {hasSummary ? (
                   <div className="mt-4">
                     {summary(false)}
-                    <Button className="mt-5 w-full justify-center py-2.5 text-base" onClick={() => setBooking(sel.name)}>
-                      {t("Continue")}
+                    <Button
+                      className="mt-5 w-full justify-center py-2.5 text-base"
+                      disabled={isMulti && !allRoomsSelected}
+                      onClick={() => setBooking(isMulti ? selectedRooms[0]?.room_type || "multi" : sel?.name || null)}
+                    >
+                      {isMulti && !allRoomsSelected
+                        ? t("Please select all {n} rooms to continue", { n: totalRooms })
+                        : t("Continue")}
                     </Button>
                   </div>
                 ) : (
@@ -1794,11 +2083,15 @@ export default function PublicBooking() {
       </main>
 
       {/* booking summary: a bottom bar on phones and tablets */}
-      {sel && selPlan && !booking && (
+      {hasSummary && !booking && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-zinc-200 bg-white/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur lg:hidden">
           <div className="mx-auto flex max-w-6xl items-center gap-4">
             <div className="min-w-0 flex-1">{summary(true)}</div>
-            <Button className="shrink-0 px-6 py-2.5 text-base" onClick={() => setBooking(sel.name)}>
+            <Button
+              className="shrink-0 px-6 py-2.5 text-base"
+              disabled={isMulti && !allRoomsSelected}
+              onClick={() => setBooking(isMulti ? selectedRooms[0]?.room_type || "multi" : sel?.name || null)}
+            >
               {t("Continue")}
             </Button>
           </div>
@@ -1810,22 +2103,26 @@ export default function PublicBooking() {
           onClose={() => setLightbox(null)} />
       )}
 
-      {booking && sel && selPlan && (
+      {booking && (isMulti ? allRoomsSelected : (sel && selPlan)) && (
         <Sheet
           wide
           title={done ? (done.status === "Requested" ? t("Request sent") : t("Booking confirmed")) : t("Complete your booking")}
-          description={done ? undefined : `${sel.room_type_name}, ${mealLabel(selPlan.meal_plan)}${forGuestsLabel ? ` ${forGuestsLabel}` : ""}`}
+          description={done ? undefined : (isMulti
+            ? selectedRoomsList.map(([, r]) => `${r.room_type_name} (${mealLabel(r.meal_plan)})`).join(", ")
+            : `${sel?.room_type_name}, ${mealLabel(selPlan?.meal_plan || "")}`
+          )}
           onClose={() => {
             setBooking(null)
             if (done) {
               setDone(null)
               setSelected(null)
+              setSelectedRooms({})
               fetchResults()
             }
           }}
           footer={
             done ? (
-              <Button className="w-full justify-center py-2.5" onClick={() => { setBooking(null); setDone(null); setSelected(null); fetchResults() }}>
+              <Button className="w-full justify-center py-2.5" onClick={() => { setBooking(null); setDone(null); setSelected(null); setSelectedRooms({}); fetchResults() }}>
                 {t("Done")}
               </Button>
             ) : (
@@ -1851,7 +2148,15 @@ export default function PublicBooking() {
               <p className="mt-4 text-sm text-zinc-500">{t("Booking number")}</p>
               <p className="text-2xl font-semibold tracking-tight text-zinc-900">{done.reservation}</p>
               <dl className="mt-6 divide-y divide-zinc-100 rounded-2xl border border-zinc-200 px-5 text-start text-sm">
-                <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{isStr ? t("Listing") : t("Room")}</dt><dd className="text-end font-medium text-zinc-800">{sel.room_type_name}, {mealLabel(selPlan.meal_plan)}{forGuestsLabel ? ` ${forGuestsLabel}` : ""}</dd></div>
+                <div className="flex justify-between gap-4 py-3">
+                  <dt className="text-zinc-500">{isStr ? t("Listing") : (isMulti ? t("Rooms") : t("Room"))}</dt>
+                  <dd className="text-end font-medium text-zinc-800">
+                    {isMulti
+                      ? selectedRoomsList.map(([idx, r]) => `${t("Room {n}", { n: Number(idx) + 1 })}: ${r.room_type_name} (${mealLabel(r.meal_plan)})`).join(" • ")
+                      : `${sel?.room_type_name}, ${mealLabel(selPlan?.meal_plan || "")}`
+                    }
+                  </dd>
+                </div>
                 <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{t("Dates")}</dt><dd className="text-end font-medium text-zinc-800">{fmtDay(search.check_in_date)} {t("to")} {fmtDay(checkOut)}</dd></div>
                 <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{t("Guests")}</dt><dd className="text-end font-medium text-zinc-800">{guestsLabel}</dd></div>
                 <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{t("Total")}</dt><dd className="text-end font-semibold text-zinc-900">{money(done.amount)}</dd></div>
@@ -1876,11 +2181,16 @@ export default function PublicBooking() {
               {/* what they are booking */}
               <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-zinc-50 p-4">
                 <div className="flex min-w-0 items-center gap-3">
-                  {imagesOf(sel.media)[0] && (
+                  {sel && imagesOf(sel.media)[0] && (
                     <img src={imagesOf(sel.media)[0].url} alt="" className="size-14 shrink-0 rounded-lg object-cover" />
                   )}
                   <div className="min-w-0 text-sm">
-                    <p className="font-semibold text-zinc-900">{sel.room_type_name}</p>
+                    <p className="font-semibold text-zinc-900">
+                      {isMulti
+                        ? selectedRoomsList.map(([idx, r]) => `${t("Room {n}", { n: Number(idx) + 1 })}: ${r.room_type_name}`).join(", ")
+                        : sel?.room_type_name
+                      }
+                    </p>
                     <p className="text-zinc-500">
                       {fmtDay(search.check_in_date)} {t("to")} {fmtDay(checkOut)}, {guestsLabel}
                     </p>
@@ -1888,10 +2198,12 @@ export default function PublicBooking() {
                   </div>
                 </div>
                 <div className="text-end">
-                  {selPlan.list_amount && selPlan.list_amount > selPlan.amount_after_tax && (
+                  {!isMulti && selPlan?.list_amount && selPlan.list_amount > selPlan.amount_after_tax && (
                     <p className="text-sm text-zinc-400 line-through tabular-nums">{money(selPlan.list_amount)}</p>
                   )}
-                  <p className="text-xl font-semibold tabular-nums text-zinc-900">{money(selPlan.amount_after_tax)}</p>
+                  <p className="text-xl font-semibold tabular-nums text-zinc-900">
+                    {money(isMulti ? multiTotal : (selPlan?.amount_after_tax || 0))}
+                  </p>
                   <p className="text-xs text-zinc-500">{t("Taxes and fees included")}</p>
                 </div>
               </div>

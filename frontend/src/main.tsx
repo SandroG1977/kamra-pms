@@ -55,4 +55,9 @@ function mount() {
 
 // Wait for the active locale chunk so the first paint is already
 // translated; English skips the network round-trip.
-void initLang().then(mount)
+// If language loading fails or is delayed, ensure we still mount.
+void initLang()
+  .catch((err) => {
+    console.error("initLang warning:", err)
+  })
+  .then(mount)
