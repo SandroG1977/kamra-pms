@@ -489,6 +489,8 @@ export default function PublicBooking() {
   useEffect(() => adoptGuestLanguage(), [])
   const params = useParams()
   const navigate = useNavigate()
+  const navigateRef = useRef(navigate)
+  navigateRef.current = navigate
   const location = useLocation()
   const [property, setProperty] = useState<string | null>(null)
   const [catalogMode, setCatalogMode] = useState<string | null>(null)
@@ -616,7 +618,7 @@ export default function PublicBooking() {
       .then((idx) => {
         setCatalogMode(idx.mode)
         if (idx.mode === "single_listing" && idx.listing_slug) {
-          navigate(`/stay/${idx.listing_slug}`, { replace: true })
+          navigateRef.current(`/stay/${idx.listing_slug}`, { replace: true })
           return null
         }
         if (idx.mode === "properties") {
@@ -648,18 +650,25 @@ export default function PublicBooking() {
         }
       })
       .catch(() => setLoadFailed(true))
-  }, [navigate, propertySlug])
+  }, [propertySlug])
 
   // stay state lives in the URL - shareable, crawlable, UTM params kept
   useEffect(() => {
     const qs = new URLSearchParams(location.search)
-    if (propertySlug) qs.set("property", propertySlug)
+    qs.delete("check_in_date")
+    qs.delete("check_out_date")
+    qs.delete("checkin")
+    qs.delete("checkout")
+    qs.delete("adults")
+    qs.delete("children")
+    qs.delete("rooms")
+    if (propertySlug && !slugInPath) qs.set("property", propertySlug)
     const query = qs.toString()
     const roomsPart = (search.rooms || 1) > 1 ? `/${search.rooms}` : ""
-    navigate(
-      `/book/${search.check_in_date}/${checkOut}/${search.adults}/${search.children}${roomsPart}${query ? `?${query}` : ""}`,
-      { replace: true },
-    )
+    const target = `/book/${search.check_in_date}/${checkOut}/${search.adults}/${search.children}${roomsPart}${query ? `?${query}` : ""}`
+    if (location.pathname + (location.search || "") !== target) {
+      navigate(target, { replace: true })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, checkOut])
 
