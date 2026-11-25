@@ -15,7 +15,9 @@ import {
   Eye,
   Images,
   MapPin,
+  Minus,
   Phone,
+  Plus,
   Search,
   ShieldCheck,
   Star,
@@ -525,6 +527,9 @@ export default function PublicBooking() {
   const [childAgesState, setChildAges] = useState<ChildAge[]>([])
   const childAges = sizeAges(childAgesState, search.children)
   const agesMissing = search.children > 0 && !agesToSend(childAges)
+  const [adultsStr, setAdultsStr] = useState<string | null>(null)
+  const [childrenStr, setChildrenStr] = useState<string | null>(null)
+  const [petsStr, setPetsStr] = useState<string | null>(null)
   const [editing, setEditing] = useState(() => {
     const qs = new URLSearchParams(window.location.search)
     return qs.get("search") === "1" || qs.get("expand") === "1"
@@ -1038,32 +1043,92 @@ export default function PublicBooking() {
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-zinc-500">{t("Adults")}</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={maxAdults || undefined}
-                    className={inputCls}
-                    value={search.adults}
-                    onChange={(e) =>
-                      setSearch({ ...search, adults: clampGuests(Number(e.target.value), 1, maxAdults) })
-                    }
-                  />
+                  <div className="flex h-11 items-center rounded-lg border border-zinc-300 bg-white focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-brand-600">
+                    <button
+                      type="button"
+                      aria-label={t("Decrease adults")}
+                      disabled={search.adults <= 1}
+                      onClick={() => setSearch((s) => ({ ...s, adults: Math.max(1, s.adults - 1) }))}
+                      className="flex h-full w-10 shrink-0 items-center justify-center rounded-l-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    >
+                      <Minus className="size-4" />
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      max={maxAdults || undefined}
+                      className="h-full w-full border-0 bg-transparent text-center text-base font-medium text-zinc-900 focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      value={adultsStr !== null ? adultsStr : search.adults}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setAdultsStr(val)
+                        if (val !== "") {
+                          const n = parseInt(val, 10)
+                          if (!isNaN(n)) setSearch((s) => ({ ...s, adults: clampGuests(n, 1, maxAdults) }))
+                        }
+                      }}
+                      onBlur={() => {
+                        setAdultsStr(null)
+                        setSearch((s) => ({ ...s, adults: clampGuests(s.adults || 1, 1, maxAdults) }))
+                      }}
+                    />
+                    <button
+                      type="button"
+                      aria-label={t("Increase adults")}
+                      disabled={maxAdults > 0 && search.adults >= maxAdults}
+                      onClick={() => setSearch((s) => ({ ...s, adults: clampGuests(s.adults + 1, 1, maxAdults) }))}
+                      className="flex h-full w-10 shrink-0 items-center justify-center rounded-r-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    >
+                      <Plus className="size-4" />
+                    </button>
+                  </div>
                   {maxAdults > 0 && search.adults >= maxAdults && (
                     <span className="mt-1 block text-xs text-zinc-500">{t("Sleeps up to {n}", { n: maxAdults })}</span>
                   )}
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-zinc-500">{t("Children")}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={maxChildren || undefined}
-                    className={inputCls}
-                    value={search.children}
-                    onChange={(e) =>
-                      setSearch({ ...search, children: clampGuests(Number(e.target.value), 0, maxChildren) })
-                    }
-                  />
+                  <div className="flex h-11 items-center rounded-lg border border-zinc-300 bg-white focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-brand-600">
+                    <button
+                      type="button"
+                      aria-label={t("Decrease children")}
+                      disabled={search.children <= 0}
+                      onClick={() => setSearch((s) => ({ ...s, children: Math.max(0, s.children - 1) }))}
+                      className="flex h-full w-10 shrink-0 items-center justify-center rounded-l-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    >
+                      <Minus className="size-4" />
+                    </button>
+                    <input
+                      type="number"
+                      min={0}
+                      max={maxChildren || undefined}
+                      className="h-full w-full border-0 bg-transparent text-center text-base font-medium text-zinc-900 focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      value={childrenStr !== null ? childrenStr : search.children}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setChildrenStr(val)
+                        if (val !== "") {
+                          const n = parseInt(val, 10)
+                          if (!isNaN(n)) setSearch((s) => ({ ...s, children: clampGuests(n, 0, maxChildren) }))
+                        }
+                      }}
+                      onBlur={() => {
+                        setChildrenStr(null)
+                        setSearch((s) => ({ ...s, children: clampGuests(s.children || 0, 0, maxChildren) }))
+                      }}
+                    />
+                    <button
+                      type="button"
+                      aria-label={t("Increase children")}
+                      disabled={maxChildren > 0 && search.children >= maxChildren}
+                      onClick={() => setSearch((s) => ({ ...s, children: clampGuests(s.children + 1, 0, maxChildren) }))}
+                      className="flex h-full w-10 shrink-0 items-center justify-center rounded-r-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                    >
+                      <Plus className="size-4" />
+                    </button>
+                  </div>
                   {maxChildren > 0 && search.children >= maxChildren && (
                     <span className="mt-1 block text-xs text-zinc-500">{t("Up to {n} children", { n: maxChildren })}</span>
                   )}
@@ -1071,13 +1136,44 @@ export default function PublicBooking() {
                 {!!p.pets_allowed && (
                   <label className="block">
                     <span className="mb-1 block text-xs font-medium text-zinc-500">{t("Pets")}</span>
-                    <input
-                      type="number"
-                      min={0}
-                      className={inputCls}
-                      value={search.pets}
-                      onChange={(e) => setSearch({ ...search, pets: Math.max(0, Number(e.target.value) || 0) })}
-                    />
+                    <div className="flex h-11 items-center rounded-lg border border-zinc-300 bg-white focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-brand-600">
+                      <button
+                        type="button"
+                        aria-label={t("Decrease pets")}
+                        disabled={search.pets <= 0}
+                        onClick={() => setSearch((s) => ({ ...s, pets: Math.max(0, s.pets - 1) }))}
+                        className="flex h-full w-10 shrink-0 items-center justify-center rounded-l-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                      >
+                        <Minus className="size-4" />
+                      </button>
+                      <input
+                        type="number"
+                        min={0}
+                        className="h-full w-full border-0 bg-transparent text-center text-base font-medium text-zinc-900 focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        value={petsStr !== null ? petsStr : search.pets}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          setPetsStr(val)
+                          if (val !== "") {
+                            const n = parseInt(val, 10)
+                            if (!isNaN(n)) setSearch((s) => ({ ...s, pets: Math.max(0, n) }))
+                          }
+                        }}
+                        onBlur={() => {
+                          setPetsStr(null)
+                          setSearch((s) => ({ ...s, pets: Math.max(0, s.pets || 0) }))
+                        }}
+                      />
+                      <button
+                        type="button"
+                        aria-label={t("Increase pets")}
+                        onClick={() => setSearch((s) => ({ ...s, pets: s.pets + 1 }))}
+                        className="flex h-full w-10 shrink-0 items-center justify-center rounded-r-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                      >
+                        <Plus className="size-4" />
+                      </button>
+                    </div>
                     {(p.pet_charge || 0) > 0 && (
                       <span className="mt-1 block text-xs text-zinc-500">
                         {money(p.pet_charge || 0)} {petChargeBasis(p.pet_charge_basis, t)}
