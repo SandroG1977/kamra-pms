@@ -885,7 +885,9 @@ export default function PublicBooking() {
 
   const fmtDay = (iso: string) =>
     (parseDate(iso) ?? new Date()).toLocaleDateString(lang, { weekday: "short", day: "numeric", month: "short" })
-  const guestsLabel = tn(search.adults + search.children, "{n} guest", "{n} guests")
+  const totalGuests = search.adults + search.children
+  const guestsLabel = tn(totalGuests, "{n} guest", "{n} guests")
+  const forGuestsLabel = totalGuests > 0 ? tn(totalGuests, "for {n} guest", "for {n} guests") : ""
   const mealLabel = (mp: string) =>
     mp ? translate(data.meal_plans.find((m) => m.name === mp)?.label ?? mp) : t("Room only")
 
@@ -932,7 +934,7 @@ export default function PublicBooking() {
           )}
           <div className="min-w-0">
             <p className="font-semibold text-zinc-900">{sel.room_type_name}</p>
-            <p className="text-sm text-zinc-500">{mealLabel(selPlan.meal_plan)}</p>
+            <p className="text-sm text-zinc-500">{mealLabel(selPlan.meal_plan)}{forGuestsLabel ? ` ${forGuestsLabel}` : ""}</p>
           </div>
         </div>
       )}
@@ -1550,7 +1552,7 @@ export default function PublicBooking() {
                                       className={"p-4 transition " + (on ? "bg-brand-50 shadow-[inset_3px_0_0_var(--color-brand-600)] rtl:shadow-[inset_-3px_0_0_var(--color-brand-600)]" : "")}>
                                       <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
                                         <div className="min-w-0 flex-1 basis-52 space-y-1">
-                                          <p className="font-medium text-zinc-900">{mealLabel(pl.meal_plan)}</p>
+                                          <p className="font-medium text-zinc-900">{mealLabel(pl.meal_plan)}{forGuestsLabel ? ` ${forGuestsLabel}` : ""}</p>
                                           {terms && (
                                             <p className={"flex items-center gap-1.5 text-sm " + (terms.free ? "text-brand-700" : "text-zinc-500")}>
                                               <ShieldCheck className="size-3.5 shrink-0" aria-hidden />
@@ -1812,7 +1814,7 @@ export default function PublicBooking() {
         <Sheet
           wide
           title={done ? (done.status === "Requested" ? t("Request sent") : t("Booking confirmed")) : t("Complete your booking")}
-          description={done ? undefined : `${sel.room_type_name}, ${mealLabel(selPlan.meal_plan)}`}
+          description={done ? undefined : `${sel.room_type_name}, ${mealLabel(selPlan.meal_plan)}${forGuestsLabel ? ` ${forGuestsLabel}` : ""}`}
           onClose={() => {
             setBooking(null)
             if (done) {
@@ -1849,7 +1851,7 @@ export default function PublicBooking() {
               <p className="mt-4 text-sm text-zinc-500">{t("Booking number")}</p>
               <p className="text-2xl font-semibold tracking-tight text-zinc-900">{done.reservation}</p>
               <dl className="mt-6 divide-y divide-zinc-100 rounded-2xl border border-zinc-200 px-5 text-start text-sm">
-                <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{isStr ? t("Listing") : t("Room")}</dt><dd className="text-end font-medium text-zinc-800">{sel.room_type_name}, {mealLabel(selPlan.meal_plan)}</dd></div>
+                <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{isStr ? t("Listing") : t("Room")}</dt><dd className="text-end font-medium text-zinc-800">{sel.room_type_name}, {mealLabel(selPlan.meal_plan)}{forGuestsLabel ? ` ${forGuestsLabel}` : ""}</dd></div>
                 <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{t("Dates")}</dt><dd className="text-end font-medium text-zinc-800">{fmtDay(search.check_in_date)} {t("to")} {fmtDay(checkOut)}</dd></div>
                 <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{t("Guests")}</dt><dd className="text-end font-medium text-zinc-800">{guestsLabel}</dd></div>
                 <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{t("Total")}</dt><dd className="text-end font-semibold text-zinc-900">{money(done.amount)}</dd></div>

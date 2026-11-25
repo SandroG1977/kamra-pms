@@ -6220,6 +6220,8 @@
   "Add one": "Adicionar um",
   "{n} guest": "{n} hóspede",
   "{n} guests": "{n} hóspedes",
+  "for {n} guest": "para {n} pessoa",
+  "for {n} guests": "para {n} pessoas",
   "Total for {n} night": "Total para {n} noite",
   "Total for {n} nights": "Total para {n} noites",
   "Sleeps {adults} adults and {n} child": "Para {adults} adultos e {n} criança",
