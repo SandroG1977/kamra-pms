@@ -49,6 +49,28 @@ const inr = (n: number) =>
   fmtAmount(n)
 const money = (n: number) => `${cur()}${inr(n)}`
 
+function trackEvent(name: string, payload: Record<string, unknown>) {
+  try {
+    const win = window as unknown as {
+      dataLayer?: unknown[]
+      fbq?: (...args: unknown[]) => void
+    }
+    win.dataLayer = win.dataLayer || []
+    win.dataLayer.push({ event: name, ...payload })
+    if (typeof win.fbq === "function") {
+      const fbEventMap: Record<string, string> = {
+        search: "Search",
+        begin_checkout: "InitiateCheckout",
+        purchase: "Purchase",
+      }
+      const fbName = fbEventMap[name] || name
+      win.fbq("track", fbName, payload)
+    }
+  } catch {
+    // tracking must never break the booking flow
+  }
+}
+
 interface Photo { url: string; caption: string | null }
 
 interface Showcase {
@@ -101,6 +123,8 @@ interface Showcase {
     meta_description: string | null
     og_image: string | null
     page_slug: string | null
+    google_tag_manager_id?: string | null
+    meta_pixel_id?: string | null
   }
   room_types: {
     name: string
@@ -862,6 +886,13 @@ export default function PublicBooking() {
       const map: Record<string, StayResult> = {}
       rows.forEach((r) => (map[r.room_type] = r))
       setResults(map)
+      trackEvent("search", {
+        check_in_date: search.check_in_date,
+        check_out_date: checkOut,
+        adults: search.adults,
+        children: search.children,
+        rooms_count: rows.length,
+      })
       // a selection the new search can no longer sell is dropped
       const pick = linkPick.current
       if (pick) {
@@ -977,6 +1008,18 @@ export default function PublicBooking() {
         advance_due: Number(res.advance_due || 0),
         balance_at_hotel: Number(res.balance_at_hotel ?? res.amount_after_tax ?? 0),
         status: res.status,
+      })
+      trackEvent("purchase", {
+        transaction_id: res.reservation,
+        value: res.amount_after_tax,
+        advance_due: Number(res.advance_due || 0),
+        currency: locale().currency || "INR",
+        room_type: sel?.room_type_name,
+        meal_plan: selected?.meal_plan,
+        check_in_date: search.check_in_date,
+        check_out_date: checkOut,
+        adults: search.adults,
+        children: search.children,
       })
     } catch (e) {
       setError(serverError(e))
@@ -1209,6 +1252,23 @@ export default function PublicBooking() {
         </div>
       </>
     )
+  }
+
+  function startBooking(roomTypeName: string | null) {
+    if (!roomTypeName) return
+    setBooking(roomTypeName)
+    if (sel && selPlan) {
+      trackEvent("begin_checkout", {
+        room_type: sel.room_type_name,
+        meal_plan: selPlan.meal_plan,
+        value: selPlan.amount_after_tax,
+        currency: locale().currency || "INR",
+        check_in_date: search.check_in_date,
+        check_out_date: checkOut,
+        adults: search.adults,
+        children: search.children,
+      })
+    }
   }
 
   return (
@@ -2268,7 +2328,7 @@ export default function PublicBooking() {
                     <Button
                       className="mt-5 w-full justify-center py-2.5 text-base"
                       disabled={isMulti && !allRoomsSelected}
-                      onClick={() => setBooking(isMulti ? selectedRooms[0]?.room_type || "multi" : sel?.name || null)}
+                      onClick={() => startBooking(isMulti ? selectedRooms[0]?.room_type || "multi" : sel?.name || null)}
                     >
                       {isMulti && !allRoomsSelected
                         ? t("Please select all {n} rooms to continue", { n: totalRooms })
@@ -2296,7 +2356,7 @@ export default function PublicBooking() {
             <Button
               className="shrink-0 px-6 py-2.5 text-base"
               disabled={isMulti && !allRoomsSelected}
-              onClick={() => setBooking(isMulti ? selectedRooms[0]?.room_type || "multi" : sel?.name || null)}
+              onClick={() => startBooking(isMulti ? selectedRooms[0]?.room_type || "multi" : sel?.name || null)}
             >
               {t("Continue")}
             </Button>

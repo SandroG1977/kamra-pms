@@ -97,6 +97,8 @@ def _property_payload(prop) -> dict:
 		"meta_description": prop.get("meta_description"),
 		"og_image": prop.get("og_image"),
 		"page_slug": prop.get("page_slug"),
+		"google_tag_manager_id": prop.get("google_tag_manager_id"),
+		"meta_pixel_id": prop.get("meta_pixel_id"),
 		"booking_engine_enabled": prop.get("booking_engine_enabled"),
 		"auto_expand_search": int(prop.get("auto_expand_search") or 0),
 		"payment_mode": prop.get("booking_payment_mode") or "Pay at hotel",
