@@ -294,15 +294,33 @@ class HolidayPackageTestCase(AuditTestCase):
 		self.assertEqual(len(q_shifted["nightly"]), 3)
 		self.assertEqual(q_shifted["package"]["package_name"], "Pacote Réveillon Costa do Mar")
 
-		# Case 2: 7 nights (d0..d7) enclosing the package: 3 package nights + 4 extra nights @ 400
+		# Case 2: 7 nights (d0..d7) enclosing the package: 3 package nights + 4 regular nights @ base rate (200)
 		q_extended = pricing.quote(PROP_A, self.rt, d0, d7, adults=2)
-		self.assertEqual(q_extended["room_total"], 3450.0)
+		self.assertEqual(q_extended["room_total"], 2650.0)
 		self.assertEqual(len(q_extended["nightly"]), 7)
 		pkg_nights = [n for n in q_extended["nightly"] if n["package"] == "Pacote Réveillon Costa do Mar"]
-		extra_nights = [n for n in q_extended["nightly"] if "Diária Adicional" in n["package"]]
+		regular_nights = [n for n in q_extended["nightly"] if n["package"] is None]
 		self.assertEqual(len(pkg_nights), 3)
-		self.assertEqual(len(extra_nights), 4)
-		self.assertEqual(extra_nights[0]["rate"], 400.0)
+		self.assertEqual(len(regular_nights), 4)
+		self.assertEqual(regular_nights[0]["rate"], 200.0)
+
+		# Case 3: 4 nights stay touching an expanded 4-night window (d3..d6) with package_nights=3:
+		# 3 package nights (1850) + 1 extra night inside package window @ 400 = 2250.00
+		pkg_expanded = self.make_package(
+			package_name="Pacote Réveillon 4D Window",
+			start_date=str(add_days(d0, 3)),
+			end_date=d6,
+			package_nights=3,
+			price_2_pax=1850,
+			extra_night_price=400,
+			priority=60,
+		)
+		q_window_extra = pricing.quote(PROP_A, self.rt, str(add_days(d0, 3)), d7, adults=2)
+		self.assertEqual(q_window_extra["room_total"], 2250.0)
+		self.assertEqual(len(q_window_extra["nightly"]), 4)
+		extra_in_window = [n for n in q_window_extra["nightly"] if "Diária Adicional" in (n.get("package") or "")]
+		self.assertEqual(len(extra_in_window), 1)
+		self.assertEqual(extra_in_window[0]["rate"], 400.0)
 
 	def test_agreed_rate_bypasses_package(self):
 		"""When staff specifies an agreed rate at front desk, it overrides the package rate."""

@@ -1052,9 +1052,22 @@ def quote(
 					rate = (pkg_base_rate - accum) if pkg_i == pkg_count else base_per_night
 					accum += rate
 					label = pkg.package_name
-				else:
+				elif d in inside_pkg:
 					rate = extra_night_rate
 					label = f"{pkg.package_name} (Diária Adicional)"
+				else:
+					rate = season_adjust(
+						property, d,
+						occupancy_rate(rt, adults, children, d,
+						               allow_small_group=small_ok),
+						room_type
+					)
+					if str(d) not in occ_cache:
+						occ_cache[str(d)] = forecast_occupancy(
+							property, d, exclude=exclude_reservation)
+					rate, tier = demand_adjust(property, room_type, d, rate,
+					                           occupancy=occ_cache[str(d)])
+					label = None
 
 				rate, gst = room_net_rate(property, rt, rate, night_over_cap)
 				if night_over_cap:
