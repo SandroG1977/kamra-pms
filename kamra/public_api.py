@@ -103,6 +103,8 @@ def _property_payload(prop) -> dict:
 		"auto_expand_search": int(prop.get("auto_expand_search") or 0),
 		"payment_mode": prop.get("booking_payment_mode") or "Pay at hotel",
 		"advance_percent": float(prop.get("advance_percent") or 0),
+		"pix_key": prop.get("custom_pix_key") or prop.get("pix_key"),
+		"pix_beneficiary": prop.get("custom_pix_beneficiary") or prop.get("pix_beneficiary"),
 		"registration_fee": float(prop.get("registration_fee") or 0),
 		"cleaning_fee": float(prop.get("cleaning_fee") or 0),
 		"pets_allowed": int(prop.get("pets_allowed") or 0),
@@ -1102,6 +1104,9 @@ def _book_single_stay(property: str, room_type: str, check_in_date: str,
 		"security_deposit_amount": float(
 			frappe.db.get_value("Property", property, "security_deposit_amount") or 0
 		),
+		"pix_key": prop.get("custom_pix_key") or prop.get("pix_key"),
+		"pix_beneficiary": prop.get("custom_pix_beneficiary") or prop.get("pix_beneficiary"),
+		"hotel_phone": prop.phone,
 	}
 
 
@@ -1193,6 +1198,9 @@ def book(property: str, room_type: str = "", check_in_date: str = "",
 			"payment_policy": policy,
 			"pay_at_hotel": total_advance_due <= 0,
 			"status": overall_status,
+			"pix_key": prop.get("custom_pix_key") or prop.get("pix_key"),
+			"pix_beneficiary": prop.get("custom_pix_beneficiary") or prop.get("pix_beneficiary"),
+			"hotel_phone": prop.phone,
 		}
 
 	return _book_single_stay(

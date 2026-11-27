@@ -103,6 +103,8 @@ export default function BookingEngine() {
         booking_engine_enabled: doc?.booking_engine_enabled,
         booking_payment_mode: doc?.booking_payment_mode,
         advance_percent: doc?.advance_percent,
+        custom_pix_key: doc?.custom_pix_key,
+        custom_pix_beneficiary: doc?.custom_pix_beneficiary,
         registration_fee: doc?.registration_fee,
         booking_mode: doc?.booking_mode,
         minimum_nights: doc?.minimum_nights,
@@ -568,15 +570,36 @@ export default function BookingEngine() {
                     </select>
                   </label>
                   {doc.booking_payment_mode === "Advance percent" && (
-                    <label className="block max-w-xs">
-                      <span className="mb-1 block text-sm font-medium text-zinc-600">{translate("Advance percentage")}</span>
-                      <input
-                        type="number" min={0} max={100} className={inputCls}
-                        value={doc.advance_percent ?? ""}
-                        onChange={(e) => updateField("advance_percent", Number(e.target.value))}
-                      />
-                      <span className="mt-1 block text-xs text-zinc-400">{translate("Collected upfront; the rest is paid at the hotel.")}</span>
-                    </label>
+                    <>
+                      <label className="block max-w-xs">
+                        <span className="mb-1 block text-sm font-medium text-zinc-600">{translate("Advance percentage")}</span>
+                        <input
+                          type="number" min={0} max={100} className={inputCls}
+                          value={doc.advance_percent ?? ""}
+                          onChange={(e) => updateField("advance_percent", Number(e.target.value))}
+                        />
+                        <span className="mt-1 block text-xs text-zinc-400">{translate("Collected upfront; the rest is paid at the hotel.")}</span>
+                      </label>
+                      <label className="block max-w-md">
+                        <span className="mb-1 block text-sm font-medium text-zinc-600">{translate("Chave PIX (para adiantamento)")}</span>
+                        <input
+                          type="text" className={inputCls}
+                          placeholder="CPF, CNPJ, Telefone, E-mail ou Chave Aleatória"
+                          value={doc.custom_pix_key ?? ""}
+                          onChange={(e) => updateField("custom_pix_key", e.target.value)}
+                        />
+                        <span className="mt-1 block text-xs text-zinc-400">{translate("Chave PIX que o hóspede verá no motor de reservas para efetuar o adiantamento.")}</span>
+                      </label>
+                      <label className="block max-w-md">
+                        <span className="mb-1 block text-sm font-medium text-zinc-600">{translate("Nome do Titular / Beneficiário")}</span>
+                        <input
+                          type="text" className={inputCls}
+                          placeholder="Nome impresso na conta PIX"
+                          value={doc.custom_pix_beneficiary ?? ""}
+                          onChange={(e) => updateField("custom_pix_beneficiary", e.target.value)}
+                        />
+                      </label>
+                    </>
                   )}
                   {doc.booking_payment_mode === "Registration fee" && (
                     <label className="block max-w-xs">

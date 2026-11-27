@@ -7113,5 +7113,18 @@
   "Remove this room": "Remover este quarto",
   "Guests for Room {n}": "Hóspedes para o Quarto {n}",
   "Adjust adults and children per room": "Ajuste adultos e crianças por quarto",
-  "{n} room": "{n} quarto"
+  "{n} room": "{n} quarto",
+  "Pagar adiantamento de {percent}%": "Pagar adiantamento de {percent}%",
+  "Copie a chave PIX abaixo para transferir o adiantamento e garantir sua reserva:": "Copie a chave PIX abaixo para transferir o adiantamento e garantir sua reserva:",
+  "Copiar": "Copiar",
+  "Copiado!": "Copiado!",
+  "Beneficiário:": "Beneficiário:",
+  "Após o pagamento, envie o comprovante:": "Após o pagamento, envie o comprovante:",
+  "Enviar comprovante no WhatsApp": "Enviar comprovante no WhatsApp",
+  "Chave para pagamento": "Chave para pagamento",
+  "Copiar chave": "Copiar chave",
+  "O adiantamento deve ser enviado após a reserva para confirmação.": "O adiantamento deve ser enviado após a reserva para confirmação.",
+  "Chave PIX (para adiantamento)": "Chave PIX (para adiantamento)",
+  "Chave PIX que o hóspede verá no motor de reservas para efetuar o adiantamento.": "Chave PIX que o hóspede verá no motor de reservas para efetuar o adiantamento.",
+  "Nome do Titular / Beneficiário": "Nome do Titular / Beneficiário"
 }

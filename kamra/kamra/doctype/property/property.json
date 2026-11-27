@@ -62,6 +62,8 @@
   "auto_expand_search",
   "booking_payment_mode",
   "advance_percent",
+  "custom_pix_key",
+  "custom_pix_beneficiary",
   "registration_fee",
   "require_cashier_pin",
   "petty_cash_float",
@@ -450,6 +452,20 @@
    "label": "Advance %",
    "depends_on": "eval:doc.booking_payment_mode=='Advance percent'",
    "description": "Percent of the total collected upfront; the rest is paid at the hotel."
+  },
+  {
+   "fieldname": "custom_pix_key",
+   "fieldtype": "Data",
+   "label": "Chave PIX",
+   "depends_on": "eval:doc.booking_payment_mode=='Advance percent'",
+   "description": "Chave PIX para adiantamento (CPF, CNPJ, Telefone, E-mail ou Chave Aleatória)."
+  },
+  {
+   "fieldname": "custom_pix_beneficiary",
+   "fieldtype": "Data",
+   "label": "Beneficiário PIX",
+   "depends_on": "eval:doc.booking_payment_mode=='Advance percent'",
+   "description": "Nome do titular/beneficiário da conta PIX."
   },
   {
    "fieldname": "registration_fee",

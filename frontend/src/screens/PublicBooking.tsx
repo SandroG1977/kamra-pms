@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Copy,
   ExternalLink,
   Eye,
   Images,
@@ -84,6 +85,8 @@ interface Showcase {
     auto_expand_search?: number | boolean
     payment_mode: string
     advance_percent: number
+    pix_key?: string | null
+    pix_beneficiary?: string | null
     registration_fee: number
     cleaning_fee: number
     pets_allowed?: number
@@ -674,7 +677,11 @@ export default function PublicBooking() {
     advance_due: number
     balance_at_hotel: number
     status: string
+    pix_key?: string | null
+    pix_beneficiary?: string | null
+    hotel_phone?: string | null
   } | null>(null)
+  const [copiedPix, setCopiedPix] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -982,6 +989,9 @@ export default function PublicBooking() {
         advance_due: number
         balance_at_hotel: number
         status: string
+        pix_key?: string | null
+        pix_beneficiary?: string | null
+        hotel_phone?: string | null
       }>("kamra.public_api.book",
         {
           property,
@@ -1008,6 +1018,9 @@ export default function PublicBooking() {
         advance_due: Number(res.advance_due || 0),
         balance_at_hotel: Number(res.balance_at_hotel ?? res.amount_after_tax ?? 0),
         status: res.status,
+        pix_key: res.pix_key || p.pix_key,
+        pix_beneficiary: res.pix_beneficiary || p.pix_beneficiary,
+        hotel_phone: res.hotel_phone || p.phone,
       })
       trackEvent("purchase", {
         transaction_id: res.reservation,
@@ -2433,6 +2446,59 @@ export default function PublicBooking() {
                   <div className="flex justify-between gap-4 py-3"><dt className="text-zinc-500">{t("Pay at the property")}</dt><dd className="text-end font-medium text-zinc-800">{money(done.balance_at_hotel)}</dd></div>
                 )}
               </dl>
+              {(done.advance_due > 0) && (done.pix_key || p.pix_key) && (
+                <div className="mt-5 rounded-2xl border-2 border-teal-500/30 bg-teal-50/50 p-4 text-start">
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1.5 font-semibold text-teal-900">
+                      <span className="rounded bg-teal-600 px-2 py-0.5 text-xs font-bold text-white tracking-wider">PIX</span>
+                      {t("Pagar adiantamento de {percent}%", { percent: p.advance_percent || 50 })}
+                    </span>
+                    <span className="text-base font-bold text-teal-900">{money(done.advance_due)}</span>
+                  </div>
+                  <p className="mt-2 text-xs text-zinc-600">
+                    {t("Copie a chave PIX abaixo para transferir o adiantamento e garantir sua reserva:")}
+                  </p>
+                  <div className="mt-2 flex items-center gap-2 rounded-xl border border-teal-200 bg-white p-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={done.pix_key || p.pix_key || ""}
+                      className="flex-1 font-mono text-xs text-zinc-800 outline-none select-all bg-transparent"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(done.pix_key || p.pix_key || "")
+                        setCopiedPix(true)
+                        setTimeout(() => setCopiedPix(false), 2500)
+                      }}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 transition"
+                    >
+                      <Copy className="size-3.5" />
+                      {copiedPix ? t("Copiado!") : t("Copiar")}
+                    </button>
+                  </div>
+                  {(done.pix_beneficiary || p.pix_beneficiary) && (
+                    <p className="mt-2 text-xs text-zinc-600">
+                      {t("Beneficiário:")} <strong className="text-zinc-900">{done.pix_beneficiary || p.pix_beneficiary}</strong>
+                    </p>
+                  )}
+                  {(done.hotel_phone || p.phone) && (
+                    <div className="mt-3 pt-3 border-t border-teal-100 flex flex-col sm:flex-row items-center justify-between gap-2">
+                      <span className="text-xs text-zinc-600">{t("Após o pagamento, envie o comprovante:")}</span>
+                      <a
+                        href={`https://wa.me/${(done.hotel_phone || p.phone || "").replace(/\D/g, "")}?text=${encodeURIComponent(`Olá! Fiz a reserva ${done.reservation} para ${form.guest_name}. Segue o comprovante do PIX de adiantamento no valor de ${money(done.advance_due)}.`)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
+                      >
+                        {t("Enviar comprovante no WhatsApp")}
+                        <ExternalLink className="size-3" />
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
               <p className="mt-5 text-sm leading-relaxed text-zinc-600">
                 {done.status === "Pending Payment"
                   ? `${t("Your rooms are held until the advance is received.")} `
@@ -2570,15 +2636,50 @@ export default function PublicBooking() {
                 <h3 className="text-base font-semibold text-zinc-900">{t("Payment")}</h3>
                 <div className="flex items-start gap-3 rounded-xl border border-zinc-200 p-4 text-sm text-zinc-700">
                   <Wallet className="mt-0.5 size-4 shrink-0 text-brand-700" aria-hidden />
-                  <p>
-                    {p.payment_mode === "Full online"
-                      ? t("The full amount is paid online to confirm this booking.")
-                      : p.payment_mode === "Advance percent"
-                        ? t("A {percent}% advance is collected to confirm; the rest is paid at the hotel.", { percent: p.advance_percent })
-                        : p.payment_mode === "Registration fee"
-                          ? t("A registration fee of {amount} is collected to confirm; the rest is paid at the hotel.", { amount: money(p.registration_fee) })
-                          : t("No payment today, pay at the property")}
-                  </p>
+                  <div className="flex-1 space-y-2">
+                    <p>
+                      {p.payment_mode === "Full online"
+                        ? t("The full amount is paid online to confirm this booking.")
+                        : p.payment_mode === "Advance percent"
+                          ? t("A {percent}% advance is collected to confirm; the rest is paid at the hotel.", { percent: p.advance_percent })
+                          : p.payment_mode === "Registration fee"
+                            ? t("A registration fee of {amount} is collected to confirm; the rest is paid at the hotel.", { amount: money(p.registration_fee) })
+                            : t("No payment today, pay at the property")}
+                    </p>
+                    {p.pix_key && (p.payment_mode === "Advance percent" || p.payment_mode === "Full online") && (
+                      <div className="mt-3 rounded-lg border border-teal-200 bg-teal-50/60 p-3 text-xs text-zinc-800">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-teal-900 flex items-center gap-1.5">
+                            <span className="inline-block px-1.5 py-0.5 rounded bg-teal-600 text-white font-bold text-[10px] tracking-wider">PIX</span>
+                            {t("Chave para pagamento")}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(p.pix_key!)
+                              setCopiedPix(true)
+                              setTimeout(() => setCopiedPix(false), 2500)
+                            }}
+                            className="inline-flex items-center gap-1 rounded bg-teal-100 hover:bg-teal-200 text-teal-800 px-2 py-1 font-medium transition-colors"
+                          >
+                            <Copy className="size-3" />
+                            {copiedPix ? t("Copiado!") : t("Copiar chave")}
+                          </button>
+                        </div>
+                        <p className="mt-1.5 font-mono text-[11px] select-all break-all text-zinc-900 bg-white/80 p-1.5 rounded border border-teal-100">
+                          {p.pix_key}
+                        </p>
+                        {p.pix_beneficiary && (
+                          <p className="mt-1 text-zinc-600">
+                            {t("Beneficiário:")} <strong className="text-zinc-800">{p.pix_beneficiary}</strong>
+                          </p>
+                        )}
+                        <p className="mt-1 text-[11px] text-zinc-500">
+                          {t("O adiantamento deve ser enviado após a reserva para confirmação.")}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 {(p.security_deposit_amount || 0) > 0 && (
                   <p className="text-xs text-zinc-500">

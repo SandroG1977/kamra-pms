@@ -7116,5 +7116,18 @@
   "Remove this room": "Eliminar esta habitación",
   "Guests for Room {n}": "Huéspedes para Habitación {n}",
   "Adjust adults and children per room": "Ajuste adultos y niños por habitación",
-  "{n} room": "{n} habitación"
+  "{n} room": "{n} habitación",
+  "Pagar adiantamento de {percent}%": "Pagar anticipo de {percent}%",
+  "Copie a chave PIX abaixo para transferir o adiantamento e garantir sua reserva:": "Copie la clave PIX abajo para transferir el anticipo y asegurar su reserva:",
+  "Copiar": "Copiar",
+  "Copiado!": "¡Copiado!",
+  "Beneficiário:": "Beneficiario:",
+  "Após o pagamento, envie o comprovante:": "Luego del pago, envíe el comprobante:",
+  "Enviar comprovante no WhatsApp": "Enviar comprobante por WhatsApp",
+  "Chave para pagamento": "Clave de pago",
+  "Copiar chave": "Copiar clave",
+  "O adiantamento deve ser enviado após a reserva para confirmação.": "El anticipo debe enviarse tras la reserva para su confirmación.",
+  "Chave PIX (para adiantamento)": "Clave PIX (para anticipo)",
+  "Chave PIX que o hóspede verá no motor de reservas para efetuar o adiantamento.": "Clave PIX que verá el huésped en el motor de reservas para pagar el anticipo.",
+  "Nome do Titular / Beneficiário": "Nombre del Titular / Beneficiario"
 }
